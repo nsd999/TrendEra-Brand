@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description: "TrendEra Brand — create the trend. Explore the store launch and contact the team.",
   applicationName: "TRENDERA",
   openGraph: { title: "TRENDERA — Create the Trend", description: "The official TrendEra Brand storefront.", type: "website" },
-  robots: { index: false, follow: false },
+  robots: { index: process.env.NEXT_PUBLIC_STORE_MODE === "live", follow: process.env.NEXT_PUBLIC_STORE_MODE === "live" },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#050505" };
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
