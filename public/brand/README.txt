@@ -1,0 +1,1 @@
+Brand assets: add the provided full TrendEra logo as trendera-logo.png here and the monogram as trendera-mark.jpg. The current header uses a typographic wordmark until the originals are added.
