@@ -1,43 +1,48 @@
 # TrendEra Storefront
 
-Independent, GitHub-first Next.js storefront foundation for TrendEra Brand. This repository is not tied to Lovable or Shoopy. It uses Next.js App Router, TypeScript, and optional Supabase services.
-
-## Status
-
-This is a source-code starter with a responsive launch-mode storefront, contact form endpoint, Supabase client setup, database migration foundation, and documented integration boundaries. It is not yet a production-ready commerce system: payment processing, authenticated customer workflows, complete admin CRUD, inventory reservation, and end-to-end tests must be implemented and verified before accepting real orders. No payment is simulated.
+A GitHub-first Next.js storefront foundation for TrendEra Brand. Built with Next.js App Router, TypeScript, responsive CSS, an optional Supabase database foundation, and Vercel deployment configuration.
 
 ## Run locally
 
-Requirements: Node.js 20.9+, npm, and Git.
+Requirements: Node.js 20.9+ and npm.
 
-```bash
-cp .env.example .env.local
-npm install
-npm run dev
-```
+1. Copy `.env.example` to `.env.local` and fill in the values you have.
+2. Run `npm install`.
+3. Run `npm run dev` and open http://localhost:3000.
 
-Open http://localhost:3000. See `.env.example` and the full setup steps in this README.
+The site defaults to `NEXT_PUBLIC_STORE_MODE=coming-soon`. Set it to `live` to show the shop shell; it will not invent product listings or stock. Until the catalogue and checkout are implemented, do not accept live orders.
 
-## Brand assets
+## Vercel deployment
 
-Place the supplied full logo at `public/brand/trendera-logo.png` and monogram at `public/brand/trendera-mark.jpg`. The header falls back to a text wordmark if the logo is missing.
+1. Open Vercel and choose **Add New → Project**.
+2. Import `nsd999/TrendEra-Brand` from GitHub.
+3. Keep Framework Preset as **Next.js** and Root Directory as `./`.
+4. Use Build Command `npm run build` and Install Command `npm install`. These are also recorded in `vercel.json`.
+5. Add required variables from `.env.example` in Project Settings → Environment Variables. Add public values to Preview and Production as appropriate. Add `RESEND_API_KEY`, `CONTACT_TO_EMAIL` and `CONTACT_FROM_EMAIL` only as server-side variables.
+6. Deploy a Preview first; test mobile navigation and the contact flow. Then assign the production domain and set `NEXT_PUBLIC_SITE_URL` to its absolute HTTPS origin.
 
-## Supabase
+Vercel detects Next.js automatically; no custom server or output directory is required.
 
-Create a Supabase project, configure the environment variables, and run `supabase/migrations/0001_initial_schema.sql`. Review RLS before production use. This project does not create a public admin account or hardcode credentials.
+## Environment variables
+
+- `NEXT_PUBLIC_SITE_URL`: public canonical site origin.
+- `NEXT_PUBLIC_STORE_MODE`: `coming-soon` or `live`.
+- `NEXT_PUBLIC_WHATSAPP_NUMBER`: WhatsApp number in international digits, without `+`.
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: optional browser-safe Supabase configuration.
+- `RESEND_API_KEY` and `CONTACT_TO_EMAIL` / `CONTACT_FROM_EMAIL`: server-side email delivery for the contact form. Without these, the API returns a configuration error instead of pretending to send a message.
+
+Never put service-role or payment secrets under a `NEXT_PUBLIC_` variable. Never commit `.env.local`.
+
+## Brand logo assets
+
+The supplied logo files were not included in this repository upload, so the header currently uses a typographic wordmark. Add the full logo at `public/brand/trendera-logo.png` and update `components/site-header.tsx` to use it. Add favicon derivatives only after verifying the source logo proportions.
 
 ## Checks
 
-```bash
-npm run typecheck
-npm run lint
-npm run build
-```
+Run `npm run typecheck`, `npm run lint`, and `npm run build`. GitHub Actions runs these checks on pushes and pull requests to `main`.
 
-## GitHub / Vercel
+## Current scope and production blockers
 
-This project is intended to live in `https://github.com/nsd999/TrendEra-Brand`. Import that repository into Vercel after configuring environment variables. Never commit `.env.local`.
+This is a deployment-ready starter, not a complete commerce implementation. The shop intentionally displays no fictional products. Before taking real orders, implement and security-test sign-in/session refresh, customer profile/address/order ownership, admin authorization and audit logs, product/variant CRUD, a persistent cart, server-calculated prices and shipping/tax, transactional stock reservation, Razorpay order creation/signature verification/webhook idempotency/refunds, and automated tests. Apply and review the Supabase migration and all RLS policies before storing customer data.
 
-## Required before taking real orders
-
-Implement and verify auth/session refresh, customer ownership policies, audited admin access, transactional order creation and stock reservation, payment order creation and signature/webhook verification, email delivery and abuse controls, cart/variant/coupon/shipping/tax validation, and automated tests. Do not trust client-supplied prices, roles, discounts, or payment success redirects. RLS does not replace server-side authorization.
+Contact form delivery uses Resend from a server-only route. Configure the sender domain with Resend before production. The endpoint validates inputs and includes a honeypot, but before public launch add robust rate limiting (for example, a hosted rate-limit service) and abuse monitoring; serverless in-memory rate limiting would not be sufficient.
