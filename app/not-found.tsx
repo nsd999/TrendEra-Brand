@@ -1,0 +1,2 @@
+import Link from "next/link";
+export default function NotFound(){return <main id="main-content" className="site-shell page"><div className="eyebrow">404 · NOT FOUND</div><h1>This page wandered off.</h1><p className="lead">The link may be old or the page may not be available yet.</p><div className="actions" style={{justifyContent:"flex-start"}}><Link className="button" href="/">Back to home</Link></div></main>;}
