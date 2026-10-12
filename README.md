@@ -35,7 +35,7 @@ Never put service-role or payment secrets under a `NEXT_PUBLIC_` variable. Never
 
 ## Brand logo assets
 
-The supplied logo files were not included in this repository upload, so the header currently uses a typographic wordmark. Add the full logo at `public/brand/trendera-logo.png` and update `components/site-header.tsx` to use it. Add favicon derivatives only after verifying the source logo proportions.
+The official TrendEra brand logo assets and favicon derivatives have been integrated across the entire storefront, including the header, footer, hero badge, metadata icons, web app manifest, and OpenGraph/Twitter social previews. Assets are stored under `public/brand/` (`trendera-logo.png`, `trendera-mark.png`, and derivatives) and `public/` (`favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`).
 
 ## Checks
 

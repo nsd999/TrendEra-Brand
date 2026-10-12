@@ -1,7 +1,92 @@
 import Link from "next/link";
+import Image from "next/image";
+
 export default function HomePage() {
   const mode = process.env.NEXT_PUBLIC_STORE_MODE || "coming-soon";
   const whatsapp = (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "916303849852").replace(/\D/g, "");
-  if (mode === "live") return <main id="main-content" className="site-shell page"><div className="eyebrow">TRENDERA · SHOP</div><h1>Shop the collection.</h1><div className="empty-catalog"><h2>The catalogue is being connected.</h2><p>No published products are available yet. When a verified catalogue is connected, products will appear here. We never display fictional products or stock counts.</p><Link className="button" href="/contact-us">Contact the store</Link></div></main>;
-  return <main id="main-content"><section className="site-shell hero"><div className="hero-inner"><div className="eyebrow">TrendEra Brand · Hyderabad</div><h1>THE NEXT<br/>TREND IS COMING.</h1><div className="rule"/><p>We’re preparing something worth waiting for. A new chapter in style is on its way. Follow along and get in touch while we get ready.</p><div className="actions"><a className="button" href={`https://wa.me/${whatsapp}?text=${encodeURIComponent("Hi TrendEra, I would like to know when the store launches.")}`} target="_blank" rel="noopener noreferrer">Connect on WhatsApp</a><Link className="button secondary" href="/contact-us">Contact Us</Link></div></div></section><section className="soon-section"><div className="site-shell"><div className="section-head"><h2>Something is taking shape</h2><p>More details coming soon</p></div><div className="soon-grid">{["New arrivals","Everyday essentials","Statement pieces","Your next favourite"].map((label,i)=><article className="soon-card" key={label}><span>0{i+1} / COMING SOON</span><strong>{label}</strong></article>)}</div></div></section></main>;
+
+  if (mode === "live")
+    return (
+      <main id="main-content" className="site-shell page">
+        <div className="eyebrow">TRENDERA · SHOP</div>
+        <h1>Shop the collection.</h1>
+        <div className="empty-catalog">
+          <h2>The catalogue is being connected.</h2>
+          <p>
+            No published products are available yet. When a verified catalogue is
+            connected, products will appear here. We never display fictional
+            products or stock counts.
+          </p>
+          <Link className="button" href="/contact-us">
+            Contact the store
+          </Link>
+        </div>
+      </main>
+    );
+
+  return (
+    <main id="main-content">
+      <section className="site-shell hero">
+        <div className="hero-inner">
+          <div className="hero-badge">
+            <Image
+              src="/brand/trendera-mark.png"
+              alt="TrendEra Monogram"
+              width={72}
+              height={72}
+              priority
+              className="hero-mark-img"
+            />
+          </div>
+          <div className="eyebrow">TrendEra Brand · Hyderabad</div>
+          <h1>
+            THE NEXT
+            <br />
+            TREND IS COMING.
+          </h1>
+          <div className="rule" />
+          <p>
+            We’re preparing something worth waiting for. A new chapter in style is
+            on its way. Follow along and get in touch while we get ready.
+          </p>
+          <div className="actions">
+            <a
+              className="button"
+              href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(
+                "Hi TrendEra, I would like to know when the store launches."
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Connect on WhatsApp
+            </a>
+            <Link className="button secondary" href="/contact-us">
+              Contact Us
+            </Link>
+          </div>
+        </div>
+      </section>
+      <section className="soon-section">
+        <div className="site-shell">
+          <div className="section-head">
+            <h2>Something is taking shape</h2>
+            <p>More details coming soon</p>
+          </div>
+          <div className="soon-grid">
+            {[
+              "New arrivals",
+              "Everyday essentials",
+              "Statement pieces",
+              "Your next favourite",
+            ].map((label, i) => (
+              <article className="soon-card" key={label}>
+                <span>0{i + 1} / COMING SOON</span>
+                <strong>{label}</strong>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
 }
