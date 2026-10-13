@@ -26,6 +26,7 @@ type StoreOrderItem = {
   width_inches: number | string | null;
   height_inches: number | string | null;
   placement_sku: string | null;
+  print_type_id: number;
 };
 
 function getAdminClient() {
@@ -63,7 +64,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
 
   const { data: items, error: itemsError } = await supabase
     .from("store_order_items")
-    .select("product_name,variant_label,qikink_sku,quantity,unit_price,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku")
+    .select("product_name,variant_label,qikink_sku,quantity,unit_price,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku,print_type_id")
     .eq("order_id", orderId);
 
   if (itemsError || !items?.length) {
@@ -97,6 +98,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
           sku: item.qikink_sku,
           price: Number(item.unit_price).toFixed(2),
           quantity: item.quantity,
+          print_type_id: item.print_type_id,
           design,
         };
       }),
