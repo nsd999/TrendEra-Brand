@@ -227,11 +227,11 @@ export async function getQikinkOrderList(query: QikinkOrderListQuery = {}) {
   }
   if (query.order_reference_no && query.order_reference_no.length > 22) throw new Error("order_reference_no must be at most 22 characters.");
   if (query.status && !QIKINK_ORDER_STATUSES.has(query.status)) throw new Error("Unsupported Qikink order status.");
-  if (query.id && !/^\\d+$/.test(query.id)) throw new Error("Qikink order id must be numeric.");
-  if (query.ids && !/^\\d+(,\\d+)*$/.test(query.ids)) throw new Error("Qikink ids must be comma-separated numeric order IDs.");
+  if (query.id && !/^\d+$/.test(query.id)) throw new Error("Qikink order id must be numeric.");
+  if (query.ids && !/^\d+(,\d+)*$/.test(query.ids)) throw new Error("Qikink ids must be comma-separated numeric order IDs.");
   if (query.params && query.params.split(",").some((field) => !QIKINK_ORDER_FIELDS.has(field))) throw new Error("One or more Qikink response fields are unsupported.");
   for (const date of [query.live_date_min, query.live_date_max]) {
-    if (date && !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) throw new Error("Qikink live-date filters must use YYYY-MM-DD.");
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Qikink live-date filters must use YYYY-MM-DD.");
   }
   if (query.page_no !== undefined && (!Number.isInteger(query.page_no) || query.page_no < 1)) throw new Error("Qikink page_no must be a positive integer.");
 
