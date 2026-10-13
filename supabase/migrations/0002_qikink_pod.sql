@@ -12,9 +12,14 @@ create table if not exists public.product_variants (
   qikink_sku text not null,
   price numeric(12,2) not null check (price >= 0),
   compare_at_price numeric(12,2) check (compare_at_price is null or compare_at_price >= price),
-  -- NULL means stock is unknown; this is not a live Qikink stock feed.
   stock_quantity integer check (stock_quantity is null or stock_quantity >= 0),
   is_active boolean not null default false,
+  design_code text,
+  design_link text,
+  mockup_link text,
+  width_inches numeric(6,2),
+  height_inches numeric(6,2),
+  placement_sku text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -53,6 +58,12 @@ create table if not exists public.store_order_items (
   qikink_sku text not null,
   quantity integer not null check (quantity > 0 and quantity <= 20),
   unit_price numeric(12,2) not null check (unit_price >= 0),
+  design_code text,
+  design_link text,
+  mockup_link text,
+  width_inches numeric(6,2),
+  height_inches numeric(6,2),
+  placement_sku text,
   created_at timestamptz not null default now()
 );
 create index if not exists store_order_items_order_idx on public.store_order_items(order_id);
