@@ -73,7 +73,7 @@ export async function POST(request: Request) {
 
   const { data: variantRows, error: variantError } = await supabase
     .from("product_variants")
-    .select("id,label,sku,qikink_sku,price,is_active,products!inner(name,status)")
+    .select("id,label,sku,qikink_sku,price,is_active,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku,products!inner(name,status)")
     .in("id", uniqueIds);
 
   if (variantError || !variantRows || variantRows.length !== uniqueIds.length) {
@@ -82,6 +82,8 @@ export async function POST(request: Request) {
 
   type VariantRow = {
     id: string; label: string; sku: string; qikink_sku: string; price: number | string; is_active: boolean;
+    design_code: string | null; design_link: string | null; mockup_link: string | null;
+    width_inches: number | string | null; height_inches: number | string | null; placement_sku: string | null;
     products: { name: string; status: string } | { name: string; status: string }[];
   };
   const variants = variantRows as unknown as VariantRow[];
@@ -90,6 +92,8 @@ export async function POST(request: Request) {
     const variant = byId.get(item.variantId);
     const product = Array.isArray(variant?.products) ? variant.products[0] : variant?.products;
     if (!variant || !variant.is_active || product?.status !== "published" || !variant.qikink_sku) return null;
+    if (process.env.QIKINK_SANDBOX_MODE !== "false" &&
+      (!variant.design_code || !variant.design_link || !variant.mockup_link || !variant.placement_sku)) return null;
     return {
       variant_id: variant.id,
       product_name: product.name,
@@ -97,10 +101,16 @@ export async function POST(request: Request) {
       qikink_sku: variant.qikink_sku,
       quantity: item.quantity,
       unit_price: Number(variant.price),
+      design_code: variant.design_code,
+      design_link: variant.design_link,
+      mockup_link: variant.mockup_link,
+      width_inches: variant.width_inches,
+      height_inches: variant.height_inches,
+      placement_sku: variant.placement_sku,
     };
   });
   if (orderItems.some((item) => item === null)) {
-    return NextResponse.json({ error: "One or more products are not available for sale." }, { status: 409 });
+    return NextResponse.json({ error: "A product is unavailable or its Qikink SKU/design mapping is incomplete." }, { status: 409 });
   }
 
   const safeItems = orderItems.filter((item): item is NonNullable<typeof item> => item !== null);
@@ -109,7 +119,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The cart total is invalid." }, { status: 400 });
   }
 
-  // Qikink accepts only alphanumeric order references up to 15 characters.
   const orderNumber = `TR${randomBytes(6).toString("hex").toUpperCase()}`;
   let razorpayOrderId: string | null = null;
   if (parsed.data.paymentMethod === "online") {
@@ -166,7 +175,6 @@ export async function POST(request: Request) {
     await submitStoreOrderToQikink(order.id);
     return NextResponse.json({ orderId: order.id, orderNumber: order.order_number, paymentMethod: "cod", fulfilment: "submitted" }, { status: 201 });
   } catch {
-    // Order remains recorded and marked for manual review; do not silently lose a COD order.
     return NextResponse.json({
       orderId: order.id,
       orderNumber: order.order_number,
