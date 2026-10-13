@@ -35,7 +35,8 @@ Implemented on the Qikink feature branch:
 - Supabase schema for variants, order snapshots and fulfilment status.
 - Checkout API foundation for online payments (Razorpay order creation) and COD.
 - Signed Razorpay payment.captured webhook that validates amount/currency before Qikink submission.
-- A non-secret Qikink configuration status endpoint.
+- A non-secret Qikink capability status endpoint.
+- An admin-token-protected Qikink Order List API proxy for approved live credentials; sandbox lookup is disabled per the supplied API docs.
 
 Not yet implemented:
 - Qikink catalogue import, live inventory sync or tracking sync; endpoint/webhook support needs confirmation with Qikink.
