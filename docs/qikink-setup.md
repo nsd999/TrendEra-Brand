@@ -39,7 +39,7 @@ Set these under Vercel → trenderabrand → Settings → Environment Variables.
 | RAZORPAY_KEY_ID | Razorpay key ID used to create online payment orders. |
 | RAZORPAY_KEY_SECRET | Server-only Razorpay key secret. |
 | RAZORPAY_WEBHOOK_SECRET | Server-only webhook secret configured in Razorpay. |
-| NEXT_PUBLIC_SITE_URL | Exact production origin, e.g. https://trenderabrand.vercel.app. |
+| NEXT_PUBLIC_SITE_URL | Exact production origin, e.g. https://trenderabrand.vercel.app. |\n| CHECKOUT_ALLOWED_ORIGINS | Optional comma-separated trusted checkout origins, used for branch aliases that do not match VERCEL_URL. |
 
 After adding or changing variables, redeploy the relevant Vercel environment.
 
