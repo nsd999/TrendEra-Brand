@@ -11,15 +11,16 @@ export async function GET() {
 
   return NextResponse.json({
     provider: "qikink",
-    integrationConfigured: configured && (sandbox || liveEnabled),
+    integrationConfigured: configured,
     mode: sandbox ? "sandbox" : "live",
     liveOrderSubmissionEnabled: liveEnabled,
     capabilities: {
       orderSubmission: configured && (sandbox || liveEnabled),
+      orderLookup: configured && !sandbox && Boolean(process.env.QIKINK_ADMIN_API_TOKEN?.trim()),
       catalogImport: false,
       liveInventorySync: false,
       trackingSync: false,
     },
-    note: "Catalog import, live stock and tracking sync are not implemented because a confirmed supported endpoint/webhook is still needed.",
+    note: "Order lookup uses Qikink /api/order/list only with approved live credentials and QIKINK_ADMIN_API_TOKEN. Qikink documents order lookup as unavailable in sandbox. Catalog import, live inventory sync and tracking/webhook sync are not implemented.",
   });
 }
