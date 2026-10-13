@@ -81,10 +81,26 @@ function getAdminClient() {
 }
 
 function requestOriginAllowed(request: Request) {
-  const expected = process.env.NEXT_PUBLIC_SITE_URL;
   const origin = request.headers.get("origin");
-  if (!expected || !origin) return false;
-  try { return new URL(origin).origin === new URL(expected).origin; } catch { return false; }
+  if (!origin) return false;
+
+  let normalizedOrigin: string;
+  try { normalizedOrigin = new URL(origin).origin; } catch { return false; }
+
+  const explicitOrigins = (process.env.CHECKOUT_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const configuredOrigins = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
+    ...explicitOrigins,
+  ].filter((value): value is string => Boolean(value));
+
+  return configuredOrigins.some((value) => {
+    try { return new URL(value).origin === normalizedOrigin; } catch { return false; }
+  });
 }
 
 export async function POST(request: Request) {
