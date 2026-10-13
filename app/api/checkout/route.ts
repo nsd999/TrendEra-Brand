@@ -7,6 +7,46 @@ import { submitStoreOrderToQikink } from "@/lib/qikink/fulfil-order";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const QIKINK_PRINT_TYPE_IDS = new Set([1, 2, 3, 5, 6, 7, 12, 13, 14, 15, 17, 23]);
+
+function isHttpsUrl(value: string | null) {
+  if (!value) return false;
+  try { return new URL(value).protocol === "https:"; } catch { return false; }
+}
+
+function hasValidSandboxVariantMapping(variant: {
+  print_type_id: number;
+  design_code: string | null;
+  design_link: string | null;
+  mockup_link: string | null;
+  width_inches: number | string | null;
+  height_inches: number | string | null;
+  placement_sku: string | null;
+}) {
+  if (!QIKINK_PRINT_TYPE_IDS.has(Number(variant.print_type_id))) return false;
+  const hasDesignMetadata = Boolean(
+    variant.design_code?.trim() || variant.design_link?.trim() || variant.mockup_link?.trim() ||
+    variant.placement_sku?.trim() || variant.width_inches != null || variant.height_inches != null
+  );
+  // Qikink plain products are print_type_id 1 with no design metadata at all.
+  if (Number(variant.print_type_id) === 1 && !hasDesignMetadata) return true;
+  if (!variant.design_code?.trim() || !isHttpsUrl(variant.mockup_link)) return false;
+
+  const widthProvided = variant.width_inches != null && String(variant.width_inches).trim() !== "";
+  const heightProvided = variant.height_inches != null && String(variant.height_inches).trim() !== "";
+  const hasNewDesignDimensions = widthProvided || heightProvided || Boolean(variant.design_link?.trim());
+  // Existing designs may be reused with blank dimensions/design_link. New designs need all fields.
+  if (!hasNewDesignDimensions) return true;
+  if (!isHttpsUrl(variant.design_link) || !variant.placement_sku?.trim() || !widthProvided || !heightProvided) return false;
+
+  const width = Number(variant.width_inches);
+  const height = Number(variant.height_inches);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
+  if (Number(variant.print_type_id) === 1 && (width > 16 || height > 20)) return false;
+  if (Number(variant.print_type_id) === 17 && (width > 18 || height > 20)) return false;
+  return true;
+}
+
 const schema = z.object({
   paymentMethod: z.enum(["online", "cod"]),
   customer: z.object({
@@ -22,7 +62,7 @@ const schema = z.object({
     phone: z.string().trim().min(8).max(15),
     email: z.string().trim().email().max(40),
     city: z.string().trim().min(2).max(40),
-    zip: z.string().trim().min(4).max(10),
+    zip: z.string().trim().regex(/^\\d{4,10}$/, "Postal code must be numeric."),
     province: z.string().trim().min(2).max(40),
     country: z.string().trim().default("India"),
     country_code: z.string().trim().length(2).default("IN"),
@@ -92,8 +132,7 @@ export async function POST(request: Request) {
     const variant = byId.get(item.variantId);
     const product = Array.isArray(variant?.products) ? variant.products[0] : variant?.products;
     if (!variant || !variant.is_active || product?.status !== "published" || !variant.qikink_sku) return null;
-    if (process.env.QIKINK_SANDBOX_MODE !== "false" &&
-      (!variant.design_code || !variant.design_link || !variant.mockup_link || !variant.placement_sku)) return null;
+    if (process.env.QIKINK_SANDBOX_MODE !== "false" && !hasValidSandboxVariantMapping(variant)) return null;
     return {
       variant_id: variant.id,
       product_name: product.name,
