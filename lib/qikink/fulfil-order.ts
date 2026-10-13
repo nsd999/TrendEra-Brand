@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
-import { createQikinkOrder, type QikinkShippingAddress } from "./client";
+import { createQikinkOrder, type QikinkDesign, type QikinkShippingAddress } from "./client";
 
 type StoreOrder = {
   id: string;
@@ -20,21 +20,22 @@ type StoreOrderItem = {
   qikink_sku: string;
   quantity: number;
   unit_price: number | string;
+  design_code: string | null;
+  design_link: string | null;
+  mockup_link: string | null;
+  width_inches: number | string | null;
+  height_inches: number | string | null;
+  placement_sku: string | null;
 };
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-/**
- * Call only after payment is verified, or after a COD order has been explicitly confirmed.
- * The database claim prevents two concurrent webhooks from submitting the same order.
- */
+/** Call only after payment is verified, or after a COD order has been explicitly confirmed. */
 export async function submitStoreOrderToQikink(orderId: string) {
   const supabase = getAdminClient();
   const { data: order, error: orderError } = await supabase
@@ -62,7 +63,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
 
   const { data: items, error: itemsError } = await supabase
     .from("store_order_items")
-    .select("product_name,variant_label,qikink_sku,quantity,unit_price")
+    .select("product_name,variant_label,qikink_sku,quantity,unit_price,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku")
     .eq("order_id", orderId);
 
   if (itemsError || !items?.length) {
@@ -78,14 +79,27 @@ export async function submitStoreOrderToQikink(orderId: string) {
     const shipping = order.shipping_address as QikinkShippingAddress;
     const result = await createQikinkOrder({
       order_number: order.order_number,
-      gateway: order.payment_method === "cod" ? "cash_on_delivery" : "online",
+      gateway: order.payment_method === "cod" ? "COD" : "Prepaid",
       total_order_value: Number(order.total_amount),
-      line_items: (items as StoreOrderItem[]).map((item) => ({
-        search_from_my_products: true,
-        price: Number(item.unit_price).toFixed(2),
-        quantity: item.quantity,
-        sku: item.qikink_sku,
-      })),
+      line_items: (items as StoreOrderItem[]).map((item) => {
+        const design: QikinkDesign | null =
+          item.design_code && item.design_link && item.mockup_link && item.placement_sku
+            ? {
+                design_code: item.design_code,
+                design_link: item.design_link,
+                mockup_link: item.mockup_link,
+                width_inches: String(item.width_inches ?? ""),
+                height_inches: String(item.height_inches ?? ""),
+                placement_sku: item.placement_sku,
+              }
+            : null;
+        return {
+          sku: item.qikink_sku,
+          price: Number(item.unit_price).toFixed(2),
+          quantity: item.quantity,
+          design,
+        };
+      }),
       shipping_address: shipping,
     });
 
