@@ -62,7 +62,7 @@ const schema = z.object({
     phone: z.string().trim().min(8).max(15),
     email: z.string().trim().email().max(40),
     city: z.string().trim().min(2).max(40),
-    zip: z.string().trim().regex(/^\\d{4,10}$/, "Postal code must be numeric."),
+    zip: z.string().trim().regex(/^\d{4,10}$/, "Postal code must be numeric."),
     province: z.string().trim().min(2).max(40),
     country: z.string().trim().default("India"),
     country_code: z.string().trim().length(2).default("IN"),
