@@ -18,55 +18,53 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-razorpay-signature") ?? "";
   const expected = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-  if (!safeEqualHex(expected, signature)) {
-    return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
-  }
+  if (!safeEqualHex(expected, signature)) return NextResponse.json({ error: "Invalid webhook signature." }, { status: 401 });
 
   let event: {
     event?: string;
-    payload?: { payment?: { entity?: { order_id?: string; status?: string } } };
+    payload?: { payment?: { entity?: { order_id?: string; status?: string; amount?: number; currency?: string } } };
   };
-  try {
-    event = JSON.parse(rawBody) as typeof event;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
-  }
+  try { event = JSON.parse(rawBody) as typeof event; }
+  catch { return NextResponse.json({ error: "Invalid JSON." }, { status: 400 }); }
 
   if (event.event !== "payment.captured") return NextResponse.json({ received: true });
-
-  const razorpayOrderId = event.payload?.payment?.entity?.order_id;
-  if (!razorpayOrderId) return NextResponse.json({ error: "Missing payment order ID." }, { status: 400 });
+  const payment = event.payload?.payment?.entity;
+  const razorpayOrderId = payment?.order_id;
+  if (!razorpayOrderId || payment?.status !== "captured") {
+    return NextResponse.json({ error: "Missing captured payment details." }, { status: 400 });
+  }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return NextResponse.json({ error: "Order storage is not configured." }, { status: 503 });
+  const supabase = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
-  const supabase = createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: order, error } = await supabase
-    .from("store_orders")
-    .select("id")
+  const { data: order, error } = await supabase.from("store_orders")
+    .select("id,total_amount,currency,payment_status")
     .eq("razorpay_order_id", razorpayOrderId)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: "Could not find the store order." }, { status: 503 });
   if (!order) return NextResponse.json({ error: "Store order is not recorded yet." }, { status: 404 });
+  if (payment?.currency !== order.currency || payment?.amount !== Math.round(Number(order.total_amount) * 100)) {
+    return NextResponse.json({ error: "Captured payment does not match the order amount." }, { status: 400 });
+  }
 
-  const { error: paidError } = await supabase.from("store_orders").update({
-    payment_status: "paid",
-    status: "confirmed",
-    updated_at: new Date().toISOString(),
-  }).eq("id", order.id).neq("payment_status", "paid");
-
-  if (paidError) return NextResponse.json({ error: "Could not update payment status." }, { status: 503 });
+  if (order.payment_status !== "paid") {
+    const { error: paidError } = await supabase.from("store_orders").update({
+      payment_status: "paid",
+      status: "confirmed",
+      updated_at: new Date().toISOString(),
+    }).eq("id", order.id).neq("payment_status", "paid");
+    if (paidError) return NextResponse.json({ error: "Could not update payment status." }, { status: 503 });
+  }
 
   try {
     await submitStoreOrderToQikink(order.id);
   } catch {
-    // Keep webhook response retryable; inspect store_orders.qikink_last_error and Qikink dashboard.
-    return NextResponse.json({ error: "Payment was recorded; Qikink submission needs review." }, { status: 503 });
+    // The order is saved with qikink_submission_status=failed for manual inspection.
+    // Do not blindly retry an ambiguous provider timeout: it could create a duplicate print order.
+    return NextResponse.json({ received: true, fulfilment: "needs_review" });
   }
-
   return NextResponse.json({ received: true });
 }
