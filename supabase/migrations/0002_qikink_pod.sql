@@ -20,6 +20,7 @@ create table if not exists public.product_variants (
   width_inches numeric(6,2),
   height_inches numeric(6,2),
   placement_sku text,
+  print_type_id integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -64,6 +65,7 @@ create table if not exists public.store_order_items (
   width_inches numeric(6,2),
   height_inches numeric(6,2),
   placement_sku text,
+  print_type_id integer not null default 1,
   created_at timestamptz not null default now()
 );
 create index if not exists store_order_items_order_idx on public.store_order_items(order_id);
