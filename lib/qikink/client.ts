@@ -16,6 +16,7 @@ export type QikinkLineItem = {
   sku: string;
   price: string;
   quantity: number;
+  print_type_id: number;
   design?: QikinkDesign | null;
 };
 
@@ -103,7 +104,7 @@ async function sendOrder(input: QikinkCreateOrderInput, token: string) {
         sku: item.sku,
         quantity: String(item.quantity),
         price: item.price,
-        print_type_id: 1,
+        print_type_id: item.print_type_id,
         designs: [{
           design_code: item.design.design_code,
           width_inches: item.design.width_inches,
