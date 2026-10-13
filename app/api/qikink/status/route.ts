@@ -4,21 +4,22 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const configured = Boolean(
-    process.env.QIKINK_API_BASE_URL?.trim() &&
-    process.env.QIKINK_AUTH_TOKEN?.trim()
-  );
+  const sandbox = process.env.QIKINK_SANDBOX_MODE !== "false";
+  const secret = sandbox ? process.env.QIKINK_SANDBOX_SECRET : process.env.QIKINK_CLIENT_SECRET;
+  const configured = Boolean(process.env.QIKINK_CLIENT_ID?.trim() && secret?.trim());
+  const liveEnabled = !sandbox && process.env.QIKINK_LIVE_ORDERS_ENABLED === "true";
 
   return NextResponse.json({
     provider: "qikink",
-    integrationConfigured: configured,
-    mode: process.env.QIKINK_MODE === "live" ? "live" : "sandbox",
+    integrationConfigured: configured && (sandbox || liveEnabled),
+    mode: sandbox ? "sandbox" : "live",
+    liveOrderSubmissionEnabled: liveEnabled,
     capabilities: {
-      orderSubmission: configured,
+      orderSubmission: configured && (sandbox || liveEnabled),
       catalogImport: false,
       liveInventorySync: false,
       trackingSync: false,
     },
-    note: "Catalog, stock and tracking APIs must be confirmed with Qikink before enabling those capabilities.",
+    note: "Catalog import, live stock and tracking sync are not implemented because a confirmed supported endpoint/webhook is still needed.",
   });
 }
