@@ -73,7 +73,7 @@ export async function POST(request: Request) {
 
   const { data: variantRows, error: variantError } = await supabase
     .from("product_variants")
-    .select("id,label,sku,qikink_sku,price,is_active,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku,products!inner(name,status)")
+    .select("id,label,sku,qikink_sku,price,is_active,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku,print_type_id,products!inner(name,status)")
     .in("id", uniqueIds);
 
   if (variantError || !variantRows || variantRows.length !== uniqueIds.length) {
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
   type VariantRow = {
     id: string; label: string; sku: string; qikink_sku: string; price: number | string; is_active: boolean;
     design_code: string | null; design_link: string | null; mockup_link: string | null;
-    width_inches: number | string | null; height_inches: number | string | null; placement_sku: string | null;
+    width_inches: number | string | null; height_inches: number | string | null; placement_sku: string | null; print_type_id: number;
     products: { name: string; status: string } | { name: string; status: string }[];
   };
   const variants = variantRows as unknown as VariantRow[];
@@ -107,6 +107,7 @@ export async function POST(request: Request) {
       width_inches: variant.width_inches,
       height_inches: variant.height_inches,
       placement_sku: variant.placement_sku,
+      print_type_id: variant.print_type_id,
     };
   });
   if (orderItems.some((item) => item === null)) {
