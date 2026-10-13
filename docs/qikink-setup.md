@@ -1,6 +1,6 @@
 # Qikink Custom API setup for TrendEra
 
-This integration targets the Qikink Custom API credentials shown in the Qikink dashboard. The credential exchange and /api/order/create request shape are based on a current third-party integration walkthrough; verify the exact endpoints and payload against your logged-in Qikink API documentation/support before production use. Qikink's public legacy docs also show a different auth_token / createOrder interface, so do not mix the two API styles.
+This integration follows the Qikink API Orders (List) documentation, version 08-25 supplied for this project: token exchange at POST /api/token, order creation at POST /api/order/create, and live order lookup at GET /api/order/list. Keep these endpoints and field names distinct from the older legacy auth_token / createOrder API.
 
 ## What is implemented on this branch
 
@@ -11,11 +11,12 @@ This integration targets the Qikink Custom API credentials shown in the Qikink d
 - Online orders create a Razorpay order and are sent to Qikink only after a signed payment.captured webhook with a matching amount and currency.
 - A database claim prevents concurrent webhook deliveries from submitting the same order twice.
 - Qikink order IDs and safe error messages are saved to the private order table.
-- GET /api/qikink/status reports configuration status without revealing credentials.
+- GET /api/qikink/status reports configured capabilities without revealing credentials. It does not perform an authentication probe.
+- GET /api/qikink/orders proxies the documented paginated /api/order/list endpoint only with a separate admin bearer token and approved live credentials; it is deliberately disabled in sandbox.
 
 ## Important current limitations
 
-- Qikink product-catalogue import, live inventory sync and tracking sync are not implemented. The API documentation available to this implementation did not confirm supported catalogue/stock/tracking endpoints or webhook events. Check Qikink's current logged-in docs/support before promising real-time syncing.
+- Qikink product-catalogue import, live inventory sync and push-based tracking/webhook sync are not implemented because this API specification does not document those capabilities. The Order List endpoint is a live-only pull lookup, not an inventory or tracking webhook.
 - TrendEra still needs the customer-facing product listing, cart, Razorpay Checkout UI, order confirmation/tracking pages, secure admin product editor, rate limiting/abuse protection, and tests before accepting public orders. Keep NEXT_PUBLIC_STORE_MODE=coming-soon.
 - No stock is represented as live Qikink inventory. A null stock_quantity means unknown; do not show a fabricated stock count.
 - A Qikink timeout may have an ambiguous outcome. The code marks the order for manual review instead of blindly resubmitting and risking duplicate production.
@@ -32,6 +33,7 @@ Set these under Vercel → trenderabrand → Settings → Environment Variables.
 | QIKINK_SANDBOX_SECRET | Sandbox client secret. Server-only. |
 | QIKINK_CLIENT_SECRET | Live client secret; leave blank until live access is approved. |
 | QIKINK_LIVE_ORDERS_ENABLED=false | Safety lock. Set to true only when intentionally enabling paid live fulfilment. |
+| QIKINK_ADMIN_API_TOKEN | Optional, separate strong random bearer token protecting GET /api/qikink/orders. It does not enable live order submission. |
 | NEXT_PUBLIC_SUPABASE_URL | Existing Supabase project URL. |
 | SUPABASE_SERVICE_ROLE_KEY | Server-only Supabase service-role key. Never prefix it with NEXT_PUBLIC_. |
 | RAZORPAY_KEY_ID | Razorpay key ID used to create online payment orders. |
@@ -65,16 +67,17 @@ Subscribe to payment.captured and use the exact secret stored in RAZORPAY_WEBHOO
 ## 5. Test before launch
 
 1. Keep sandbox mode enabled and live orders disabled.
-2. Check https://trenderabrand.vercel.app/api/qikink/status for configuration only; this endpoint does not call Qikink or expose secrets.
-3. After checkout UI is completed, test both online and COD orders with sandbox credentials and public design/mockup URLs.
-4. Confirm the Qikink order exists in the sandbox dashboard and that failed submissions are reviewed before retrying.
-5. Ask Qikink to approve live API access. Add the live secret, set QIKINK_SANDBOX_MODE=false, and only then set QIKINK_LIVE_ORDERS_ENABLED=true.
-6. Place a low-value controlled live test before opening the store to customers.
+2. Check https://trenderabrand.vercel.app/api/qikink/status for environment/capability flags only; this endpoint does not call Qikink or expose secrets.
+3. Do not test order lookup in sandbox: the supplied Qikink specification states Get Order is unavailable there. After live API access is formally approved, configure QIKINK_ADMIN_API_TOKEN and call GET /api/qikink/orders with Authorization: Bearer <token>.
+4. After checkout UI is completed, test both online and COD orders with sandbox credentials and public design/mockup URLs.
+5. Confirm the Qikink order exists in the sandbox dashboard and that failed submissions are reviewed before retrying.
+6. Ask Qikink to approve live API access. Add the live secret, set QIKINK_SANDBOX_MODE=false, and only then set QIKINK_LIVE_ORDERS_ENABLED=true when ready to permit production submission.
+7. Place a low-value controlled live test before opening the store to customers.
 
-## API references
+## API specification used
 
+- Qikink API Orders (List), version 08-25, supplied for this integration.
 - Qikink dashboard API docs: https://admins.qikink.com/api-docs
 - Qikink help centre: https://qikink.com/help/
-- Third-party implementation reference for the Custom API token/order endpoints: https://anupamkushwaha.me/blog/integrating-qikink-pod-api-with-nodejs
 
-If Qikink provides updated official endpoint details, prefer those over any third-party example and update lib/qikink/client.ts accordingly.
+If Qikink changes the Custom API contract, prefer its latest official docs and update lib/qikink/client.ts accordingly.
