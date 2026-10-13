@@ -73,14 +73,17 @@ export async function submitStoreOrderToQikink(orderId: string) {
       total_order_value: Number(order.total_amount),
       line_items: (items as StoreOrderItem[]).map((item) => {
         const design: QikinkDesign | null =
-          item.design_code && item.design_link && item.mockup_link && item.placement_sku
+          item.design_code && item.mockup_link
             ? {
+                // Qikink allows an existing design code to be reused with blank
+                // dimensions/design_link/placement_sku. New designs are validated
+                // by checkout before they reach this fulfillment function.
                 design_code: item.design_code,
-                design_link: item.design_link,
+                design_link: item.design_link ?? "",
                 mockup_link: item.mockup_link,
                 width_inches: String(item.width_inches ?? ""),
                 height_inches: String(item.height_inches ?? ""),
-                placement_sku: item.placement_sku,
+                placement_sku: item.placement_sku ?? "",
               }
             : null;
         return {
