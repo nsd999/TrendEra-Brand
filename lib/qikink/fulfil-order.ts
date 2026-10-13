@@ -3,17 +3,6 @@ import "server-only";
 import { createClient } from "@supabase/supabase-js";
 import { createQikinkOrder, type QikinkDesign, type QikinkShippingAddress } from "./client";
 
-type StoreOrder = {
-  id: string;
-  order_number: string;
-  status: string;
-  payment_status: string;
-  payment_method: "online" | "cod";
-  total_amount: number | string;
-  shipping_address: QikinkShippingAddress;
-  qikink_submission_status: string;
-};
-
 type StoreOrderItem = {
   product_name: string;
   variant_label: string;
