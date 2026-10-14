@@ -138,26 +138,31 @@ a, button { -webkit-tap-highlight-color: transparent; }
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 60;
+    z-index: 9999;
+    isolation: isolate;
     visibility: hidden;
     pointer-events: none;
-    background: rgba(0,0,0,0);
+    background: rgba(0,0,0,.82);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
     transition: background .22s ease, visibility .22s ease;
   }
   .mobile-nav-overlay.is-open {
     visibility: visible;
     pointer-events: auto;
-    background: rgba(0,0,0,.62);
+    background: rgba(0,0,0,.82);
   }
   .mobile-nav-panel {
     position: absolute;
     inset: 0 auto 0 0;
+    z-index: 1;
     width: min(88vw, 390px);
     min-height: 100%;
     padding: max(20px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
-    background: #080808;
+    background: #080808 !important;
+    color: #f5f5f5;
     border-right: 1px solid #2b2b2b;
     transform: translateX(-102%);
     transition: transform .28s cubic-bezier(.2,.75,.25,1);
