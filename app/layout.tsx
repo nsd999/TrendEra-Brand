@@ -40,9 +40,59 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script id="trendera-external-browser" strategy="beforeInteractive">
           {`(function () {
   "use strict";
+  var fallbackFlag = "__trendera_open_browser_fallback";
+  var isFallbackPage = false;
+
+  function showFallback() {
+    window.setTimeout(function () {
+      if (document.visibilityState === "hidden" || !document.body) return;
+      if (document.getElementById("trendera-browser-help")) return;
+
+      var overlay = document.createElement("div");
+      overlay.id = "trendera-browser-help";
+      overlay.setAttribute("role", "dialog");
+      overlay.setAttribute("aria-modal", "true");
+      overlay.setAttribute("aria-labelledby", "trendera-browser-help-title");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.96);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center";
+
+      var card = document.createElement("div");
+      card.style.cssText = "width:100%;max-width:420px;padding:26px;border:1px solid rgba(255,255,255,.18);border-radius:18px;background:#101010;box-shadow:0 24px 70px rgba(0,0,0,.45)";
+
+      var title = document.createElement("h2");
+      title.id = "trendera-browser-help-title";
+      title.textContent = "Open TrendEra in your browser";
+      title.style.cssText = "font-size:21px;line-height:1.3;margin:0 0 12px;font-weight:700";
+
+      var message = document.createElement("p");
+      message.textContent = "This app may block automatic browser switching. Tap the menu (••• or ⋮) and choose ‘Open in browser’ or ‘Open in Chrome/Safari’.";
+      message.style.cssText = "margin:0;color:#c8c8c8;font-size:15px;line-height:1.65";
+
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Continue on this page";
+      button.style.cssText = "margin-top:20px;padding:12px 18px;border:1px solid #777;border-radius:10px;background:#fff;color:#080808;font:inherit;font-weight:650;cursor:pointer";
+      button.addEventListener("click", function () {
+        overlay.remove();
+      });
+
+      card.appendChild(title);
+      card.appendChild(message);
+      card.appendChild(button);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+    }, 900);
+  }
+
   try {
+    var pageUrl = new URL(window.location.href);
+    isFallbackPage = pageUrl.searchParams.get(fallbackFlag) === "1";
+    if (isFallbackPage) {
+      pageUrl.searchParams.delete(fallbackFlag);
+      window.history.replaceState(window.history.state, "", pageUrl.pathname + pageUrl.search + pageUrl.hash);
+    }
+
     var ua = navigator.userAgent || navigator.vendor || "";
-    var isSocialInApp = /Instagram|FBAN|FBAV|FB_IAB|Twitter|LinkedIn|Threads|Snapchat|TikTok|Line\\//i.test(ua);
+    var isSocialInApp = /Instagram|FBAN|FBAV|FB_IAB|Messenger|WhatsApp|Twitter|LinkedIn|Threads|Snapchat|TikTok|Line\\//i.test(ua);
     if (!isSocialInApp) return;
 
     var currentUrl = window.location.href;
@@ -50,14 +100,35 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     var isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
     if (!isAndroid && !isIOS) return;
 
-    // Guard by the exact URL to avoid repeated intent redirects.
-    var storageKey = "trendera_external_browser_attempted_url";
+    // A failed intent opens this flagged URL so the visitor sees clear instructions,
+    // rather than re-triggering the same redirect and getting stuck in a loop.
+    if (isFallbackPage) {
+      showFallback();
+      return;
+    }
+
+    var storageKey = "trendera_external_browser_attempted_v2";
+    var previousAttempt = null;
     try {
-      if (window.sessionStorage.getItem(storageKey) === currentUrl) return;
-      window.sessionStorage.setItem(storageKey, currentUrl);
-      if (window.sessionStorage.getItem(storageKey) !== currentUrl) return;
-    } catch (_storageError) {
-      // If storage is blocked, avoid automatic redirects that could loop.
+      previousAttempt = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
+    } catch (_readError) {
+      showFallback();
+      return;
+    }
+
+    if (previousAttempt && previousAttempt.url === currentUrl &&
+        Date.now() - previousAttempt.at < 20000) {
+      showFallback();
+      return;
+    }
+
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify({
+        url: currentUrl,
+        at: Date.now()
+      }));
+    } catch (_writeError) {
+      showFallback();
       return;
     }
 
@@ -65,45 +136,24 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       var parsedUrl = new URL(currentUrl);
       var scheme = parsedUrl.protocol.replace(":", "");
       var intentTarget = parsedUrl.host + parsedUrl.pathname + parsedUrl.search;
-      var fallbackUrl = encodeURIComponent(currentUrl);
+      var fallbackTarget = new URL(currentUrl);
+      fallbackTarget.searchParams.set(fallbackFlag, "1");
+      var fallbackUrl = encodeURIComponent(fallbackTarget.toString());
+
       window.location.replace(
         "intent://" + intentTarget + "#Intent;scheme=" + scheme +
         ";package=com.android.chrome;S.browser_fallback_url=" + fallbackUrl + ";end"
       );
+      // Show help if the intent was blocked and the current webview stays visible.
+      showFallback();
       return;
     }
 
-    // iOS has no universal API for forcing Safari. Try Chrome if installed;
-    // otherwise show manual instructions instead of repeatedly redirecting.
+    // iOS cannot be universally forced into Safari from a web page. Try Chrome,
+    // then present manual instructions if the app blocks the custom URL scheme.
     var chromeUrl = currentUrl.replace(/^https:/i, "googlechromes:").replace(/^http:/i, "googlechrome:");
     window.location.href = chromeUrl;
-    window.setTimeout(function () {
-      if (document.visibilityState === "hidden" || !document.body) return;
-      if (document.getElementById("trendera-browser-help")) return;
-      var overlay = document.createElement("div");
-      overlay.id = "trendera-browser-help";
-      overlay.setAttribute("role", "dialog");
-      overlay.setAttribute("aria-modal", "true");
-      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.96);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center";
-      var card = document.createElement("div");
-      card.style.cssText = "width:100%;max-width:420px;padding:26px;border:1px solid rgba(255,255,255,.18);border-radius:18px;background:#101010;box-shadow:0 24px 70px rgba(0,0,0,.45)";
-      var title = document.createElement("h2");
-      title.textContent = "Open TrendEra in your browser";
-      title.style.cssText = "font-size:21px;line-height:1.3;margin:0 0 12px;font-weight:700";
-      var message = document.createElement("p");
-      message.textContent = "This app may block automatic browser switching. Tap the menu (••• or ⋮) and choose ‘Open in browser’ or ‘Open in Chrome/Safari’.";
-      message.style.cssText = "margin:0;color:#c8c8c8;font-size:15px;line-height:1.65";
-      var button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Continue on this page";
-      button.style.cssText = "margin-top:20px;padding:12px 18px;border:1px solid #777;border-radius:10px;background:#fff;color:#080808;font:inherit;font-weight:650;cursor:pointer";
-      button.addEventListener("click", function () { overlay.remove(); });
-      card.appendChild(title);
-      card.appendChild(message);
-      card.appendChild(button);
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-    }, 1000);
+    showFallback();
   } catch (_error) {
     // Browser detection must never prevent the storefront from rendering.
   }
