@@ -92,6 +92,8 @@ function requestOriginAllowed(request: Request) {
     .map((value) => value.trim())
     .filter(Boolean);
   const configuredOrigins = [
+    // Canonical Trendera storefront domain; keep Vercel aliases configurable below.
+    "https://trenderabrand.store",
     process.env.NEXT_PUBLIC_SITE_URL,
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
     process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
