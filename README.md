@@ -17,7 +17,7 @@ Requirements: Node.js 20.9+ and npm.
 ## Vercel deployment
 
 1. Import nsd999/TrendEra-Brand into Vercel, using the Next.js preset and root directory ./.
-2. Set NEXT_PUBLIC_SITE_URL=https://trenderabrand.vercel.app in the appropriate Vercel environment.
+2. Set NEXT_PUBLIC_SITE_URL=https://trenderabrand.store in the Production Vercel environment. Keep preview URLs in Preview environments as needed.
 3. Keep NEXT_PUBLIC_STORE_MODE=coming-soon while the store is being completed.
 4. Add server-only credentials through Vercel Environment Variables. Never commit .env.local or expose server secrets with a NEXT_PUBLIC_ prefix.
 5. Run a Preview deployment and review the build logs before production.
