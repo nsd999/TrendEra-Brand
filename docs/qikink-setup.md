@@ -39,7 +39,7 @@ Set these under Vercel → trenderabrand → Settings → Environment Variables.
 | RAZORPAY_KEY_ID | Razorpay key ID used to create online payment orders. |
 | RAZORPAY_KEY_SECRET | Server-only Razorpay key secret. |
 | RAZORPAY_WEBHOOK_SECRET | Server-only webhook secret configured in Razorpay. |
-| NEXT_PUBLIC_SITE_URL | Exact production origin, e.g. https://trenderabrand.vercel.app. |\n| CHECKOUT_ALLOWED_ORIGINS | Optional comma-separated trusted checkout origins, used for branch aliases that do not match VERCEL_URL. |
+| NEXT_PUBLIC_SITE_URL | Exact production origin: https://trenderabrand.store. |\n| CHECKOUT_ALLOWED_ORIGINS | Optional comma-separated trusted checkout origins, used for branch aliases that do not match VERCEL_URL. |
 
 After adding or changing variables, redeploy the relevant Vercel environment.
 
@@ -60,19 +60,19 @@ There is no public admin UI/importer yet, so this initial catalogue mapping is a
 
 In Razorpay Dashboard → Webhooks, add:
 
-https://trenderabrand.vercel.app/api/webhooks/razorpay
+https://trenderabrand.store/api/webhooks/razorpay
 
 Subscribe to payment.captured and use the exact secret stored in RAZORPAY_WEBHOOK_SECRET. The webhook verifies the HMAC signature and amount/currency before marking the order paid and submitting it to Qikink.
 
 ## 5. Test before launch
 
 1. Keep sandbox mode enabled and live orders disabled.
-2. Check https://trenderabrand.vercel.app/api/qikink/status for environment/capability flags only; this endpoint does not call Qikink or expose secrets.
+2. Check https://trenderabrand.store/api/qikink/status for environment/capability flags only; this endpoint does not call Qikink or expose secrets.
 3. Do not test order lookup in sandbox: the supplied Qikink specification states Get Order is unavailable there. After live API access is formally approved, configure QIKINK_ADMIN_API_TOKEN and call GET /api/qikink/orders with Authorization: Bearer <token>.
-4. After checkout UI is completed, test both online and COD orders with sandbox credentials and public design/mockup URLs.
-5. Confirm the Qikink order exists in the sandbox dashboard and that failed submissions are reviewed before retrying.
-6. Ask Qikink to approve live API access. Add the live secret, set QIKINK_SANDBOX_MODE=false, and only then set QIKINK_LIVE_ORDERS_ENABLED=true when ready to permit production submission.
-7. Place a low-value controlled live test before opening the store to customers.
+4. For Qikink's current approval requirement, submit at least three distinct, valid test orders through the existing checkout API while QIKINK_SANDBOX_MODE=true. Use test customer/address details and published sandbox-mapped variants. Do not use online payment for these tests unless the Razorpay test environment is also configured; COD is the simpler path for exercising Qikink sandbox submission.
+5. Verify each order returned a successful Qikink submission result and appears in the Qikink sandbox dashboard. A request reaching TrendEra or a saved local order alone does not count as a successful Qikink test order. Keep the Qikink order IDs and timestamps as evidence.
+6. The public customer-facing catalogue/cart/checkout UI is not implemented yet. Do not expose the checkout endpoint as a public order flow or switch NEXT_PUBLIC_STORE_MODE to live just to create test orders; use a controlled, authenticated test workflow or finish the UI first.
+7. After three successful sandbox orders, click “Request Live API Credentials” in the Qikink dashboard. Do not switch QIKINK_SANDBOX_MODE=false or enable live submissions until Qikink approves the request and live credentials are configured.
 
 ## API specification used
 
