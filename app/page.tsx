@@ -3,7 +3,7 @@ import Image from "next/image";
 
 export default function HomePage() {
   const mode = process.env.NEXT_PUBLIC_STORE_MODE || "coming-soon";
-  const whatsapp = (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "916303849852").replace(/\D/g, "");
+  const whatsapp = (process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "919492651908").replace(/\D/g, "");
 
   if (mode === "live")
     return (
