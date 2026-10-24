@@ -4,7 +4,7 @@ import "./globals.css";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.trenderabrand.store";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: "TRENDERA — Create the Trend", template: "%s | TRENDERA" },
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "TRENDERA — Create the Trend" }],
   },
   twitter: { card: "summary_large_image", title: "TRENDERA — Create the Trend", description: "The official TrendEra Brand storefront.", images: ["/og-image.jpg"] },
-  robots: { index: process.env.NEXT_PUBLIC_STORE_MODE === "live", follow: process.env.NEXT_PUBLIC_STORE_MODE === "live" },
+  robots: { index: true, follow: true },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#050505" };
 
