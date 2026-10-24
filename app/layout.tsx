@@ -37,6 +37,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <head>
+        <meta name="google-site-verification" content="-qlDQeaU1Ijk_ZneJ1kjzZIGmj-Hb0AQ1x3gzKM4lt0" />
         <Script id="trendera-external-browser" strategy="beforeInteractive">
           {`(function () {
   "use strict";
