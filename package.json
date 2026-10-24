@@ -2,7 +2,7 @@
   "name": "trendera-storefront",
   "version": "0.1.0",
   "private": true,
-  "scripts": { "dev":"next dev", "build":"next build", "start":"next start", "lint":"eslint .", "typecheck":"tsc --noEmit" },
+  "scripts": { "dev":"next dev", "build":"next build", "start":"next start", "lint":"eslint .", "typecheck":"tsc --noEmit", "test":"node --test tests/qikink/*.test.mjs" },
   "dependencies": {
     "@supabase/ssr":"^0.7.0",
     "@supabase/supabase-js":"^2.57.0",
