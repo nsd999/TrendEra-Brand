@@ -11,7 +11,7 @@ export interface QikinkDesign {
 
 export interface QikinkLineItem {
   search_from_my_products: boolean;
-  price: string;
+  price: string | number;
   quantity: number;
   sku: string;
   designs?: QikinkDesign[];
@@ -36,7 +36,7 @@ export interface QikinkCreateOrderInput {
   order_number: string;
   qikink_shipping: 0 | 1;
   gateway: QikinkGateway;
-  total_order_value: string;
+  total_order_value: string | number;
   line_items: QikinkLineItem[];
   shipping_address?: QikinkShippingAddress;
 }
