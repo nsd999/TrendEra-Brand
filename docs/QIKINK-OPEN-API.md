@@ -1,38 +1,34 @@
-# Qikink Open API: safe integration rollout
+# TrenderaBrand payment and fulfilment rollout
 
-## What this change provides
+## Cashfree sandbox foundation
 
-- A server-only typed client for Qikink's documented `createOrder` endpoint.
-- Validation for order number, payment gateway, item SKU, quantity, prices, designs, and shipping address.
-- Unit tests and a CI test step.
-- A server-only `QIKINK_AUTH_TOKEN` environment-variable placeholder.
+- `lib/cashfree/client.ts` is server-only and defaults to Cashfree sandbox mode.
+- Uses Cashfree's Create Order API at `https://sandbox.cashfree.com/pg/orders` with API version `2025-01-01`; production endpoint is only selected by explicitly setting `CASHFREE_ENV=production`.
+- Includes input validation, server-side order-status fetch, bounded request timeouts, and constant-time webhook signature comparison over the exact raw body.
+- Configure `CASHFREE_APP_ID` and `CASHFREE_SECRET_KEY` as server-side environment variables only. Never add a `NEXT_PUBLIC_` prefix or commit values. Do not reuse keys displayed in screenshots or chat; rotate exposed keys.
+- The client is a foundation only. It does not itself persist orders, verify that an internal cart amount is correct, or dispatch to Qikink.
 
-This change deliberately does **not** add a public checkout/dispatch route, change the storefront pages, run database migrations, or send any real order to Qikink.
+## Required before checkout can be enabled
 
-## Before enabling any order workflow
+1. Rotate/regenerate any API credential exposed in screenshots, chats, logs, or other public locations. Use the replacement only in local environment/Vercel environment settings.
+2. Confirm test credentials in Cashfree sandbox and configure `CASHFREE_ENV=sandbox` for Preview. Do not configure production keys yet.
+3. Reconcile the actual Supabase schema before writing order mutations. The live project has `products`, `product_variants`, `store_orders`, and `store_order_items`; checked-in initial migrations do not represent every live commerce table. Do not blindly rerun migrations or create duplicate tables.
+4. Build a server-side checkout route that reads product/variant prices and Qikink SKU from the database, calculates the total on the server, validates stock/variant availability, and creates a durable pending order before requesting a Cashfree payment session.
+5. Add the Cashfree hosted checkout UI. The browser may receive a payment session ID, never the API secret. A browser redirect or client callback is not proof of payment.
+6. Verify payment server-side by fetching Cashfree order/payment status and process signed webhooks using the exact raw request body plus `x-webhook-timestamp` and `x-webhook-signature`. Apply durable idempotency so a webhook/retry cannot fulfil twice.
+7. Dispatch to Qikink only after verified successful payment and a durable state transition. Store Qikink order IDs, handle ambiguous timeouts by reconciliation, and never blindly retry an order submission.
+8. Test sandbox success, failure, abandoned checkout, duplicate webhook, invalid signature, amount mismatch, retry, and Qikink timeout. Only enable live mode after merchant KYC approval, live credential setup, and explicit production review.
 
-1. Sign in to the official Qikink dashboard and verify the currently supported Open API endpoint, credential/token format, sandbox support, and order response contract. The client currently follows the published `POST https://qikink.com/erp2/index.php/api/createOrder` documentation using `auth_token` in the JSON body. Do not assume that older API documentation matches every account's current API version.
-2. Add `QIKINK_AUTH_TOKEN` to Vercel Preview only after receiving credentials. Never use a `NEXT_PUBLIC_` prefix or commit the value.
-3. Reconcile the live Supabase schema with the checked-in migrations. The live project has `products`, `product_variants`, `store_orders`, and `store_order_items`; the checked-in initial migration does not currently create all of those tables. Do not blindly re-run the initial migration or create duplicate tables.
-4. Implement customer authentication/session checks, admin authorization, server-side variant/SKU/price lookup, shipping and tax calculation, and transactional order creation.
-5. Select and integrate the customer payment provider. The provider is not yet confirmed. Never trust a payment-success flag from the browser; verify payment server-side and through the provider's signed webhook.
-6. Add durable idempotency and a reconciliation process before dispatch. A timeout does not prove Qikink failed to accept an order. Do not automatically retry ambiguous create-order requests.
-7. Test the full flow in Qikink sandbox and a Vercel Preview. Only after a successful security review and sample orders should live fulfilment be enabled.
+## Official references
 
-## Order gateway distinction
+- Cashfree hosted checkout / Create Order: https://www.cashfree.com/devstudio/preview/pg/web/checkout
+- Cashfree webhook signature verification: https://www.cashfree.com/devstudio/preview/pg/tools/webhookVerification
+- Cashfree Node SDK and API reference: https://github.com/cashfree/cashfree-pg-sdk-nodejs
 
-- `online`: use only after the customer payment has been verified successful by the payment provider.
-- `cash_on_delivery`: use only if the store explicitly enables COD and has a validated COD workflow.
+## Qikink
 
-Qikink fulfilment charges are separate from the customer's payment to the store. Ensure the Qikink account has sufficient credits before accepting live orders.
+The existing Qikink client remains server-only. Verify the current API contract and account permissions before live order submission. Qikink fulfilment charges are separate from the customer's Cashfree payment; ensure the Qikink account has sufficient credits.
 
-## Local checks
+## Status
 
-```bash
-npm run typecheck
-npm run lint
-npm test
-npm run build
-```
-
-The tests in `tests/qikink/validation.test.mjs` validate payload rules only. They do not prove that live Qikink credentials, account permissions, shipping settings, or production order submission work.
+This branch intentionally does not expose public checkout or submit live payment/fulfilment requests yet. The next implementation stage requires a reviewed schema and the checkout UI/route/webhook state machine. Existing production pages and database have not been modified by this foundation.
