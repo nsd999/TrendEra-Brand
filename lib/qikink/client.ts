@@ -63,6 +63,12 @@ async function getSandboxAccessToken(fetchImpl: typeof fetch): Promise<{ token: 
   return { token, clientId };
 }
 
+export async function verifyQikinkSandboxAuth(fetchImpl: typeof fetch = fetch): Promise<{ authenticated: true }> {
+  await getSandboxAccessToken(fetchImpl);
+  // Never return or log the access token or Client ID.
+  return { authenticated: true };
+}
+
 export async function createQikinkOrder(input: QikinkCreateOrderInput, fetchImpl: typeof fetch = fetch): Promise<QikinkCreateOrderResult> {
   const validationError = validateQikinkOrderInput(input);
   if (validationError) throw new QikinkApiError(validationError, true);
