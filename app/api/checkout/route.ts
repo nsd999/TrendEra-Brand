@@ -115,8 +115,18 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Please check the customer, address and cart details." }, { status: 400 });
 
-  if (parsed.data.paymentMethod === "online" && (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY)) {
-    return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
+  let cashfreeSiteBase = "";
+  let cashfreeCustomerPhone = "";
+  if (parsed.data.paymentMethod === "online") {
+    if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY || !process.env.NEXT_PUBLIC_SITE_URL) {
+      return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
+    }
+    cashfreeSiteBase = process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
+    const digits = parsed.data.customer.phone.replace(/\D/g, "");
+    cashfreeCustomerPhone = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
+    if (!cashfreeCustomerPhone) {
+      return NextResponse.json({ error: "Enter a valid 10-digit Indian mobile number for online payment." }, { status: 400 });
+    }
   }
 
   const supabase = getAdminClient();
@@ -200,16 +210,6 @@ export async function POST(request: Request) {
 
   if (parsed.data.paymentMethod === "online") {
     const { createCashfreeOrder } = await import("@/lib/cashfree/client");
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-    if (!siteUrl) {
-      return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
-    }
-    const siteBase = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
-    const digits = parsed.data.customer.phone.replace(/\\D/g, "");
-    const customerPhone = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
-    if (!customerPhone) {
-      return NextResponse.json({ error: "Enter a valid 10-digit Indian mobile number for online payment." }, { status: 400 });
-    }
     try {
       const cashfreeOrder = await createCashfreeOrder({
         order_id: order.order_number,
@@ -219,11 +219,11 @@ export async function POST(request: Request) {
           customer_id: order.order_number,
           customer_name: parsed.data.customer.name,
           customer_email: parsed.data.customer.email,
-          customer_phone: customerPhone,
+          customer_phone: cashfreeCustomerPhone,
         },
         order_meta: {
-          return_url: `${siteBase}/checkout/return?order_id={order_id}`,
-          notify_url: `${siteBase}/api/webhooks/cashfree`,
+          return_url: `${cashfreeSiteBase}/checkout/return?order_id={order_id}`,
+          notify_url: `${cashfreeSiteBase}/api/webhooks/cashfree`,
         },
       });
       const { error: paymentRefError } = await supabase.from("store_orders")
