@@ -204,6 +204,7 @@ export async function POST(request: Request) {
     if (!siteUrl) {
       return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
     }
+    const siteBase = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
     const digits = parsed.data.customer.phone.replace(/\\D/g, "");
     const customerPhone = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
     if (!customerPhone) {
@@ -221,8 +222,8 @@ export async function POST(request: Request) {
           customer_phone: customerPhone,
         },
         order_meta: {
-          return_url: `${siteUrl.replace(/\\/$/, "")}/checkout/return?order_id={order_id}`,
-          notify_url: `${siteUrl.replace(/\\/$/, "")}/api/webhooks/cashfree`,
+          return_url: `${siteBase}/checkout/return?order_id={order_id}`,
+          notify_url: `${siteBase}/api/webhooks/cashfree`,
         },
       });
       const { error: paymentRefError } = await supabase.from("store_orders")
