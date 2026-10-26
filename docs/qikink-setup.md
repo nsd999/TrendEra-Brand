@@ -8,7 +8,7 @@ This integration follows the Qikink API Orders (List) documentation, version 08-
 - One-hour token cache per warm server instance, with a refresh margin and one refresh on HTTP 401.
 - Server-side checkout API that looks up product prices and Qikink SKUs from Supabase (never trusts prices from the browser).
 - COD orders are submitted to Qikink after the customer confirms checkout.
-- Online orders create a Razorpay order and are sent to Qikink only after a signed payment.captured webhook with a matching amount and currency.
+- Online orders create a Cashfree payment order and are sent to Qikink only after a signed Cashfree webhook or verification request triggers server-side Cashfree status, amount, and currency validation.
 - A database claim prevents concurrent webhook deliveries from submitting the same order twice.
 - Qikink order IDs and safe error messages are saved to the private order table.
 - GET /api/qikink/status reports configured capabilities without revealing credentials. It does not perform an authentication probe.
@@ -17,7 +17,7 @@ This integration follows the Qikink API Orders (List) documentation, version 08-
 ## Important current limitations
 
 - Qikink product-catalogue import, live inventory sync and push-based tracking/webhook sync are not implemented because this API specification does not document those capabilities. The Order List endpoint is a live-only pull lookup, not an inventory or tracking webhook.
-- TrendEra still needs the customer-facing product listing, cart, Razorpay Checkout UI, order confirmation/tracking pages, secure admin product editor, rate limiting/abuse protection, and tests before accepting public orders. Keep NEXT_PUBLIC_STORE_MODE=coming-soon.
+- TrendEra still needs the customer-facing product listing, cart, Cashfree Checkout UI, order confirmation/tracking pages, secure admin product editor, rate limiting/abuse protection, and tests before accepting public orders. Keep NEXT_PUBLIC_STORE_MODE=coming-soon.
 - No stock is represented as live Qikink inventory. A null stock_quantity means unknown; do not show a fabricated stock count.
 - A Qikink timeout may have an ambiguous outcome. The code marks the order for manual review instead of blindly resubmitting and risking duplicate production.
 - Sandbox and live catalogues are separate. Sandbox custom-design orders use search_from_my_products: 0 and need real public design/mockup URLs plus placement metadata. Live orders use search_from_my_products: 1 and need the product/variant already configured in Qikink My Products.
@@ -56,7 +56,7 @@ Run supabase/migrations/0002_qikink_pod.sql after the existing 0001_initial_sche
 
 There is no public admin UI/importer yet, so this initial catalogue mapping is a controlled database task. Do not make variants active until their SKU and design mapping have been verified.
 
-## 4. Configure Razorpay webhook
+## 4. Configure Cashfree webhook
 
 In Razorpay Dashboard → Webhooks, add:
 
