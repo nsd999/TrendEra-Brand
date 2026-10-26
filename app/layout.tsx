@@ -1,10 +1,25 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import "./globals.css";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.trenderabrand.store";
+function resolveSiteUrl() {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+        return parsed.origin;
+      }
+    } catch {
+      // Ignore malformed configuration and fall back to the deployment host.
+    }
+  }
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return configured || "http://localhost:3000";
+}
+
+const siteUrl = resolveSiteUrl();
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: "TRENDERA — Create the Trend", template: "%s | TRENDERA" },
@@ -17,7 +32,9 @@ export const metadata: Metadata = {
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
     ],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
     shortcut: "/favicon.ico",
   },
   manifest: "/site.webmanifest",
@@ -26,147 +43,24 @@ export const metadata: Metadata = {
     description: "The official TrendEra Brand storefront.",
     type: "website",
     url: siteUrl,
-    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "TRENDERA — Create the Trend" }],
+    images: [
+      {
+        url: "/og-image.jpg",
+        width: 1200,
+        height: 630,
+        alt: "TRENDERA — Create the Trend",
+      },
+    ],
   },
-  twitter: { card: "summary_large_image", title: "TRENDERA — Create the Trend", description: "The official TrendEra Brand storefront.", images: ["/og-image.jpg"] },
-  robots: { index: true, follow: true },
+  twitter: {
+    card: "summary_large_image",
+    title: "TRENDERA — Create the Trend",
+    description: "The official TrendEra Brand storefront.",
+    images: ["/og-image.jpg"],
+  },
+  robots: { index: process.env.NEXT_PUBLIC_STORE_MODE === "live", follow: process.env.NEXT_PUBLIC_STORE_MODE === "live" },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#050505" };
-
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <html lang="en">
-      <head>
-        <meta name="google-site-verification" content="-qlDQeaU1Ijk_ZneJ1kjzZIGmj-Hb0AQ1x3gzKM4lt0" />
-        <Script id="trendera-external-browser" strategy="beforeInteractive">
-          {`(function () {
-  "use strict";
-  var fallbackFlag = "__trendera_open_browser_fallback";
-  var isFallbackPage = false;
-
-  function showFallback() {
-    window.setTimeout(function () {
-      if (document.visibilityState === "hidden" || !document.body) return;
-      if (document.getElementById("trendera-browser-help")) return;
-
-      var overlay = document.createElement("div");
-      overlay.id = "trendera-browser-help";
-      overlay.setAttribute("role", "dialog");
-      overlay.setAttribute("aria-modal", "true");
-      overlay.setAttribute("aria-labelledby", "trendera-browser-help-title");
-      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.96);color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:center";
-
-      var card = document.createElement("div");
-      card.style.cssText = "width:100%;max-width:420px;padding:26px;border:1px solid rgba(255,255,255,.18);border-radius:18px;background:#101010;box-shadow:0 24px 70px rgba(0,0,0,.45)";
-
-      var title = document.createElement("h2");
-      title.id = "trendera-browser-help-title";
-      title.textContent = "Open TrendEra in your browser";
-      title.style.cssText = "font-size:21px;line-height:1.3;margin:0 0 12px;font-weight:700";
-
-      var message = document.createElement("p");
-      message.textContent = "This app may block automatic browser switching. Tap the menu (••• or ⋮) and choose ‘Open in browser’ or ‘Open in Chrome/Safari’.";
-      message.style.cssText = "margin:0;color:#c8c8c8;font-size:15px;line-height:1.65";
-
-      var button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Continue on this page";
-      button.style.cssText = "margin-top:20px;padding:12px 18px;border:1px solid #777;border-radius:10px;background:#fff;color:#080808;font:inherit;font-weight:650;cursor:pointer";
-      button.addEventListener("click", function () {
-        overlay.remove();
-      });
-
-      card.appendChild(title);
-      card.appendChild(message);
-      card.appendChild(button);
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-    }, 900);
-  }
-
-  try {
-    var pageUrl = new URL(window.location.href);
-    isFallbackPage = pageUrl.searchParams.get(fallbackFlag) === "1";
-    if (isFallbackPage) {
-      pageUrl.searchParams.delete(fallbackFlag);
-      window.history.replaceState(window.history.state, "", pageUrl.pathname + pageUrl.search + pageUrl.hash);
-    }
-
-    var ua = navigator.userAgent || navigator.vendor || "";
-    var isSocialInApp = /Instagram|FBAN|FBAV|FB_IAB|Messenger|WhatsApp|Twitter|LinkedIn|Threads|Snapchat|TikTok|Line\\//i.test(ua);
-    if (!isSocialInApp) return;
-
-    var currentUrl = window.location.href;
-    var isAndroid = /Android/i.test(ua);
-    var isIOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-    if (!isAndroid && !isIOS) return;
-
-    // A failed intent opens this flagged URL so the visitor sees clear instructions,
-    // rather than re-triggering the same redirect and getting stuck in a loop.
-    if (isFallbackPage) {
-      showFallback();
-      return;
-    }
-
-    var storageKey = "trendera_external_browser_attempted_v2";
-    var previousAttempt = null;
-    try {
-      previousAttempt = JSON.parse(window.sessionStorage.getItem(storageKey) || "null");
-    } catch (_readError) {
-      showFallback();
-      return;
-    }
-
-    if (previousAttempt && previousAttempt.url === currentUrl &&
-        Date.now() - previousAttempt.at < 20000) {
-      showFallback();
-      return;
-    }
-
-    try {
-      window.sessionStorage.setItem(storageKey, JSON.stringify({
-        url: currentUrl,
-        at: Date.now()
-      }));
-    } catch (_writeError) {
-      showFallback();
-      return;
-    }
-
-    if (isAndroid) {
-      var parsedUrl = new URL(currentUrl);
-      var scheme = parsedUrl.protocol.replace(":", "");
-      var intentTarget = parsedUrl.host + parsedUrl.pathname + parsedUrl.search;
-      var fallbackTarget = new URL(currentUrl);
-      fallbackTarget.searchParams.set(fallbackFlag, "1");
-      var fallbackUrl = encodeURIComponent(fallbackTarget.toString());
-
-      window.location.replace(
-        "intent://" + intentTarget + "#Intent;scheme=" + scheme +
-        ";package=com.android.chrome;S.browser_fallback_url=" + fallbackUrl + ";end"
-      );
-      // Show help if the intent was blocked and the current webview stays visible.
-      showFallback();
-      return;
-    }
-
-    // iOS cannot be universally forced into Safari from a web page. Try Chrome,
-    // then present manual instructions if the app blocks the custom URL scheme.
-    var chromeUrl = currentUrl.replace(/^https:/i, "googlechromes:").replace(/^http:/i, "googlechrome:");
-    window.location.href = chromeUrl;
-    showFallback();
-  } catch (_error) {
-    // Browser detection must never prevent the storefront from rendering.
-  }
-})();`}
-        </Script>
-      </head>
-      <body>
-        <a className="skip-link" href="#main-content">Skip to content</a>
-        <SiteHeader />
-        {children}
-        <SiteFooter />
-      </body>
-    </html>
-  );
+  return <html lang="en"><body><a className="skip-link" href="#main-content">Skip to content</a><SiteHeader />{children}<SiteFooter /></body></html>;
 }
