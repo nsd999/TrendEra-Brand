@@ -24,7 +24,7 @@ Requirements: Node.js 20.9+ and npm.
 
 ## Environment variables
 
-See .env.example for the full list. Qikink and Razorpay credentials must be configured only in server-side environment variables. The Supabase service-role key must never be exposed to the browser.
+See .env.example for the full list. Qikink and Cashfree credentials must be configured only in server-side environment variables. The Supabase service-role key must never be exposed to the browser.
 
 ## Qikink integration
 
@@ -33,14 +33,14 @@ See docs/qikink-setup.md for database setup, sandbox/live configuration, SKU map
 Implemented on the Qikink feature branch:
 - Server-side Qikink Custom API authentication and order submission.
 - Supabase schema for variants, order snapshots and fulfilment status.
-- Checkout API foundation for online payments (Razorpay order creation) and COD.
-- Signed Razorpay payment.captured webhook that validates amount/currency before Qikink submission.
+- Checkout API foundation for online payments (Cashfree order creation) and COD.
+- Signed Cashfree webhook plus server-side payment-status verification and guarded Qikink submission.
 - A non-secret Qikink capability status endpoint.
 - An admin-token-protected Qikink Order List API proxy for approved live credentials; sandbox lookup is disabled per the supplied API docs.
 
 Not yet implemented:
 - Qikink catalogue import, live inventory sync or tracking sync; endpoint/webhook support needs confirmation with Qikink.
-- Customer-facing product/variant listing, cart, Razorpay Checkout UI, account/order pages and secure admin tools.
+- Customer-facing product/variant listing, cart, Cashfree Checkout UI, account/order pages and secure admin tools.
 - Production rate limiting, inventory reservation, order cancellation/refund flows, monitoring and end-to-end tests.
 
 ## Brand assets
