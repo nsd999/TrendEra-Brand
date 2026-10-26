@@ -36,9 +36,9 @@ Set these under Vercel → trenderabrand → Settings → Environment Variables.
 | QIKINK_ADMIN_API_TOKEN | Optional, separate strong random bearer token protecting GET /api/qikink/orders. It does not enable live order submission. |
 | NEXT_PUBLIC_SUPABASE_URL | Existing Supabase project URL. |
 | SUPABASE_SERVICE_ROLE_KEY | Server-only Supabase service-role key. Never prefix it with NEXT_PUBLIC_. |
-| RAZORPAY_KEY_ID | Razorpay key ID used to create online payment orders. |
-| RAZORPAY_KEY_SECRET | Server-only Razorpay key secret. |
-| RAZORPAY_WEBHOOK_SECRET | Server-only webhook secret configured in Razorpay. |
+| CASHFREE_ENV=sandbox | Cashfree environment; use sandbox until tests pass, then production for live payments. |
+| CASHFREE_APP_ID | Cashfree app/client ID; server-side configuration. |
+| CASHFREE_SECRET_KEY | Cashfree secret key; server-side only and shared with the configured Cashfree webhook environment. |
 | NEXT_PUBLIC_SITE_URL | Exact production origin, e.g. https://trenderabrand.vercel.app. |\n| CHECKOUT_ALLOWED_ORIGINS | Optional comma-separated trusted checkout origins, used for branch aliases that do not match VERCEL_URL. |
 
 After adding or changing variables, redeploy the relevant Vercel environment.
@@ -58,11 +58,11 @@ There is no public admin UI/importer yet, so this initial catalogue mapping is a
 
 ## 4. Configure Cashfree webhook
 
-In Razorpay Dashboard → Webhooks, add:
+In Cashfree Dashboard, configure the payment-success webhook URL:
 
-https://trenderabrand.vercel.app/api/webhooks/razorpay
+https://trenderabrand.store/api/webhooks/cashfree
 
-Subscribe to payment.captured and use the exact secret stored in RAZORPAY_WEBHOOK_SECRET. The webhook verifies the HMAC signature and amount/currency before marking the order paid and submitting it to Qikink.
+Subscribe to the Cashfree payment-success event. The webhook verifies the signature using the raw request body and timestamp, then independently queries Cashfree for the current order status and validates amount/currency before marking the order paid and attempting Qikink fulfilment. Configure the matching preview URL when testing in sandbox.
 
 ## 5. Test before launch
 
