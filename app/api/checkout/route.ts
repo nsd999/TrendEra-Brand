@@ -115,9 +115,7 @@ export async function POST(request: Request) {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Please check the customer, address and cart details." }, { status: 400 });
 
-  const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
-  const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (parsed.data.paymentMethod === "online" && (!razorpayKeyId || !razorpayKeySecret)) {
+  if (parsed.data.paymentMethod === "online" && (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY)) {
     return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
   }
 
@@ -176,25 +174,6 @@ export async function POST(request: Request) {
   }
 
   const orderNumber = `TR${randomBytes(6).toString("hex").toUpperCase()}`;
-  let razorpayOrderId: string | null = null;
-  if (parsed.data.paymentMethod === "online") {
-    const response = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString("base64")}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ amount: Math.round(total * 100), currency: "INR", receipt: orderNumber }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(12_000),
-    });
-    const paymentOrder = await response.json().catch(() => null) as { id?: string } | null;
-    if (!response.ok || !paymentOrder?.id) {
-      return NextResponse.json({ error: "Could not start online payment. Please try again." }, { status: 502 });
-    }
-    razorpayOrderId = paymentOrder.id;
-  }
-
   const { data: order, error: orderError } = await supabase.from("store_orders").insert({
     order_number: orderNumber,
     status: parsed.data.paymentMethod === "cod" ? "confirmed" : "pending",
@@ -205,7 +184,7 @@ export async function POST(request: Request) {
     customer_email: parsed.data.customer.email,
     customer_phone: parsed.data.customer.phone,
     shipping_address: parsed.data.shippingAddress,
-    razorpay_order_id: razorpayOrderId,
+    cashfree_order_id: null,
     qikink_submission_status: "pending",
   }).select("id,order_number").single();
 
@@ -220,11 +199,54 @@ export async function POST(request: Request) {
   }
 
   if (parsed.data.paymentMethod === "online") {
-    return NextResponse.json({
-      orderId: order.id,
-      orderNumber: order.order_number,
-      payment: { provider: "razorpay", keyId: razorpayKeyId, razorpayOrderId, amount: Math.round(total * 100), currency: "INR" },
-    }, { status: 201 });
+    const { createCashfreeOrder } = await import("@/lib/cashfree/client");
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    if (!siteUrl) {
+      return NextResponse.json({ error: "Online payment is not configured yet." }, { status: 503 });
+    }
+    const digits = parsed.data.customer.phone.replace(/\\D/g, "");
+    const customerPhone = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
+    if (!customerPhone) {
+      return NextResponse.json({ error: "Enter a valid 10-digit Indian mobile number for online payment." }, { status: 400 });
+    }
+    try {
+      const cashfreeOrder = await createCashfreeOrder({
+        order_id: order.order_number,
+        order_amount: total,
+        order_currency: "INR",
+        customer_details: {
+          customer_id: order.order_number,
+          customer_name: parsed.data.customer.name,
+          customer_email: parsed.data.customer.email,
+          customer_phone: customerPhone,
+        },
+        order_meta: {
+          return_url: `${siteUrl.replace(/\\/$/, "")}/checkout/return?order_id={order_id}`,
+          notify_url: `${siteUrl.replace(/\\/$/, "")}/api/webhooks/cashfree`,
+        },
+      });
+      const { error: paymentRefError } = await supabase.from("store_orders")
+        .update({ cashfree_order_id: cashfreeOrder.order_id, updated_at: new Date().toISOString() })
+        .eq("id", order.id);
+      if (paymentRefError) {
+        return NextResponse.json({ error: "Order was saved, but payment setup needs reconciliation. Contact TrendEra before retrying." }, { status: 202 });
+      }
+      return NextResponse.json({
+        orderId: order.id,
+        orderNumber: order.order_number,
+        payment: {
+          provider: "cashfree",
+          paymentSessionId: cashfreeOrder.payment_session_id,
+          cashfreeOrderId: cashfreeOrder.order_id,
+          amount: Math.round(total * 100),
+          currency: "INR",
+          environment: process.env.CASHFREE_ENV === "production" ? "production" : "sandbox",
+        },
+      }, { status: 201 });
+    } catch {
+      // Keep the persisted order for reconciliation if the provider response was inconclusive.
+      return NextResponse.json({ orderId: order.id, orderNumber: order.order_number, payment: { provider: "cashfree", status: "needs_reconciliation" }, error: "Payment setup could not be confirmed. Do not submit another payment; contact TrendEra before retrying." }, { status: 202 });
+    }
   }
 
   try {
