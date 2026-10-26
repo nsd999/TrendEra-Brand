@@ -21,6 +21,8 @@ export function TrendEraCheckout({ products }: { products: CheckoutProduct[] }) 
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "" });
   const [address, setAddress] = useState({ first_name: "", last_name: "", address1: "", address2: "", phone: "", email: "", city: "", zip: "", province: "", country: "India", country_code: "IN" });
   const [sdkReady, setSdkReady] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"online" | "cod">("online");
+  const [completedOrder, setCompletedOrder] = useState<{ orderNumber: string; fulfilment?: string } | null>(null);
 
   const selected = products.filter(p => (cart[p.id] ?? 0) > 0);
   const total = selected.reduce((sum, p) => sum + p.price * cart[p.id], 0);
@@ -48,7 +50,7 @@ export function TrendEraCheckout({ products }: { products: CheckoutProduct[] }) 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          paymentMethod: "online",
+          paymentMethod,
           customer,
           shippingAddress: address,
           items: selected.map(p => ({ variantId: p.id, quantity: cart[p.id] })),
@@ -56,6 +58,12 @@ export function TrendEraCheckout({ products }: { products: CheckoutProduct[] }) 
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not create checkout.");
+      if (paymentMethod === "cod") {
+        setCompletedOrder({ orderNumber: result.orderNumber, fulfilment: result.fulfilment });
+        setCart({});
+        setBusy(false);
+        return;
+      }
       if (result.payment?.provider !== "cashfree" || !result.payment.paymentSessionId) {
         throw new Error(result.error || "Payment session could not be confirmed. Do not submit payment again; contact TrendEra.");
       }
@@ -69,6 +77,14 @@ export function TrendEraCheckout({ products }: { products: CheckoutProduct[] }) 
   }
 
   const inputClass = "mt-1 w-full rounded-xl border border-black/15 bg-white px-3 py-3 text-sm text-black outline-none focus:border-black";
+  if (completedOrder) return (
+    <section className="mx-auto max-w-xl rounded-2xl border border-black/10 bg-white p-7 text-center">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-black/50">TrendEra · Order received</p>
+      <h2 className="mt-4 text-2xl font-semibold">Thank you for your order.</h2>
+      <p className="mt-3 text-sm text-black/65">Order reference: <strong>{completedOrder.orderNumber}</strong></p>
+      <p className="mt-2 text-sm text-black/65">{completedOrder.fulfilment === "needs_review" ? "Your order is saved. Fulfilment needs review; please contact TrendEra before placing another order." : "Your COD order has been recorded. Our fulfilment process will continue shortly."}</p>
+    </section>
+  );
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
       <Script src="https://sdk.cashfree.com/js/v3/cashfree.js" strategy="afterInteractive" onReady={() => setSdkReady(true)} />
@@ -104,10 +120,20 @@ export function TrendEraCheckout({ products }: { products: CheckoutProduct[] }) 
           <label className="text-sm">State<input className={inputClass} autoComplete="address-level1" required value={address.province} onChange={e => setAddressField("province", e.target.value)} /></label>
           <label className="text-sm">PIN / postal code<input className={inputClass} autoComplete="postal-code" inputMode="numeric" required value={address.zip} onChange={e => setAddressField("zip", e.target.value)} /></label>
         </div>
-        <div className="mt-6 rounded-xl bg-black/[0.03] p-4 text-sm"><strong>Payment method</strong><p className="mt-1 text-black/60">Secure online payment through Cashfree. Card, UPI and other methods depend on your Cashfree account configuration.</p></div>
+        <fieldset className="mt-6 rounded-xl border border-black/10 p-4 text-sm">
+          <legend className="px-1 font-semibold">Payment method</legend>
+          <label className="flex cursor-pointer items-start gap-3 py-2">
+            <input type="radio" name="paymentMethod" value="online" checked={paymentMethod === "online"} onChange={() => setPaymentMethod("online")} className="mt-1" />
+            <span><strong>Pay online with Cashfree</strong><span className="mt-1 block text-black/60">Secure payment checkout. Available methods depend on your Cashfree account.</span></span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 py-2">
+            <input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} className="mt-1" />
+            <span><strong>Cash on delivery</strong><span className="mt-1 block text-black/60">Place the order without an online payment.</span></span>
+          </label>
+        </fieldset>
         {message && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{message}</p>}
-        <button type="button" onClick={submitOrder} disabled={busy || !sdkReady || products.length === 0 || selected.length === 0} className="mt-5 w-full rounded-full bg-black px-5 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
-          {busy ? "Preparing secure payment…" : !sdkReady ? "Loading secure checkout…" : "Continue to Cashfree · ₹" + total.toFixed(2)}
+        <button type="button" onClick={submitOrder} disabled={busy || (paymentMethod === "online" && !sdkReady) || products.length === 0 || selected.length === 0} className="mt-5 w-full rounded-full bg-black px-5 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+          {busy ? (paymentMethod === "online" ? "Preparing secure payment…" : "Placing order…") : paymentMethod === "cod" ? "Place COD order · ₹" + total.toFixed(2) : !sdkReady ? "Loading secure checkout…" : "Continue to Cashfree · ₹" + total.toFixed(2)}
         </button>
         <p className="mt-3 text-center text-xs text-black/50">Your payment is confirmed only after server-side verification.</p>
       </section>
