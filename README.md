@@ -1,48 +1,52 @@
 # TrendEra Storefront
 
-A GitHub-first Next.js storefront foundation for TrendEra Brand. Built with Next.js App Router, TypeScript, responsive CSS, an optional Supabase database foundation, and Vercel deployment configuration.
+Next.js App Router storefront foundation for TrendEra Brand, with Vercel deployment configuration and a Qikink Custom API integration foundation.
+
+## Current state
+
+The website intentionally defaults to NEXT_PUBLIC_STORE_MODE=coming-soon. The product catalogue, customer-facing cart/checkout UI, order tracking pages and secure admin catalogue editor are not complete. Do not enable public orders or switch the storefront live yet.
 
 ## Run locally
 
 Requirements: Node.js 20.9+ and npm.
 
-1. Copy `.env.example` to `.env.local` and fill in the values you have.
-2. Run `npm install`.
-3. Run `npm run dev` and open http://localhost:3000.
-
-The site defaults to `NEXT_PUBLIC_STORE_MODE=coming-soon`. Set it to `live` to show the shop shell; it will not invent product listings or stock. Until the catalogue and checkout are implemented, do not accept live orders.
+1. Copy .env.example to .env.local and fill in local values.
+2. Run npm install.
+3. Run npm run dev and open http://localhost:3000.
 
 ## Vercel deployment
 
-1. Open Vercel and choose **Add New → Project**.
-2. Import `nsd999/TrendEra-Brand` from GitHub.
-3. Keep Framework Preset as **Next.js** and Root Directory as `./`.
-4. Use Build Command `npm run build` and Install Command `npm install`. These are also recorded in `vercel.json`.
-5. Add required variables from `.env.example` in Project Settings → Environment Variables. Add public values to Preview and Production as appropriate. Add `RESEND_API_KEY`, `CONTACT_TO_EMAIL` and `CONTACT_FROM_EMAIL` only as server-side variables.
-6. Deploy a Preview first; test mobile navigation and the contact flow. Then assign the production domain and set `NEXT_PUBLIC_SITE_URL` to its absolute HTTPS origin.
-
-Vercel detects Next.js automatically; no custom server or output directory is required.
+1. Import nsd999/TrendEra-Brand into Vercel, using the Next.js preset and root directory ./.
+2. Set NEXT_PUBLIC_SITE_URL=https://trenderabrand.vercel.app in the appropriate Vercel environment.
+3. Keep NEXT_PUBLIC_STORE_MODE=coming-soon while the store is being completed.
+4. Add server-only credentials through Vercel Environment Variables. Never commit .env.local or expose server secrets with a NEXT_PUBLIC_ prefix.
+5. Run a Preview deployment and review the build logs before production.
 
 ## Environment variables
 
-- `NEXT_PUBLIC_SITE_URL`: public canonical site origin.
-- `NEXT_PUBLIC_STORE_MODE`: `coming-soon` or `live`.
-- `NEXT_PUBLIC_WHATSAPP_NUMBER`: WhatsApp number in international digits, without `+`.
-- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: optional browser-safe Supabase configuration.
-- `RESEND_API_KEY` and `CONTACT_TO_EMAIL` / `CONTACT_FROM_EMAIL`: server-side email delivery for the contact form. Without these, the API returns a configuration error instead of pretending to send a message.
+See .env.example for the full list. Qikink and Cashfree credentials must be configured only in server-side environment variables. The Supabase service-role key must never be exposed to the browser.
 
-Never put service-role or payment secrets under a `NEXT_PUBLIC_` variable. Never commit `.env.local`.
+## Qikink integration
 
-## Brand logo assets
+See docs/qikink-setup.md for database setup, sandbox/live configuration, SKU mapping, payment webhook configuration and launch blockers.
 
-The official TrendEra brand logo assets and favicon derivatives have been integrated across the entire storefront, including the header, footer, hero badge, metadata icons, web app manifest, and OpenGraph/Twitter social previews. Assets are stored under `public/brand/` (`trendera-logo.png`, `trendera-mark.png`, and derivatives) and `public/` (`favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`).
+Implemented on the Qikink feature branch:
+- Server-side Qikink Custom API authentication and order submission.
+- Supabase schema for variants, order snapshots and fulfilment status.
+- Checkout API foundation for online payments (Cashfree order creation) and COD.
+- Signed Cashfree webhook plus server-side payment-status verification and guarded Qikink submission.
+- A non-secret Qikink capability status endpoint.
+- An admin-token-protected Qikink Order List API proxy for approved live credentials; sandbox lookup is disabled per the supplied API docs.
+
+Not yet implemented:
+- Qikink catalogue import, live inventory sync or tracking sync; endpoint/webhook support needs confirmation with Qikink.
+- Customer-facing product/variant listing, cart, Cashfree Checkout UI, account/order pages and secure admin tools.
+- Production rate limiting, inventory reservation, order cancellation/refund flows, monitoring and end-to-end tests.
+
+## Brand assets
+
+Brand image assets are stored under public/brand/ and public/; see those folders for available files.
 
 ## Checks
 
-Run `npm run typecheck`, `npm run lint`, and `npm run build`. GitHub Actions runs these checks on pushes and pull requests to `main`.
-
-## Current scope and production blockers
-
-This is a deployment-ready starter, not a complete commerce implementation. The shop intentionally displays no fictional products. Before taking real orders, implement and security-test sign-in/session refresh, customer profile/address/order ownership, admin authorization and audit logs, product/variant CRUD, a persistent cart, server-calculated prices and shipping/tax, transactional stock reservation, Razorpay order creation/signature verification/webhook idempotency/refunds, and automated tests. Apply and review the Supabase migration and all RLS policies before storing customer data.
-
-Contact form delivery uses Resend from a server-only route. Configure the sender domain with Resend before production. The endpoint validates inputs and includes a honeypot, but before public launch add robust rate limiting (for example, a hosted rate-limit service) and abuse monitoring; serverless in-memory rate limiting would not be sufficient.
+Run npm run typecheck, npm run lint and npm run build. GitHub Actions is configured to run checks on pushes and pull requests to main.
