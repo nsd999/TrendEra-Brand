@@ -30,7 +30,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
   const supabase = getAdminClient();
   const { data: order, error: orderError } = await supabase
     .from("store_orders")
-    .select("id,order_number,status,payment_status,payment_method,total_amount,shipping_address,qikink_submission_status")
+    .select("id,order_number,status,payment_status,payment_method,total_amount,shipping_address,qikink_submission_status,qikink_order_id")
     .eq("id", orderId)
     .single();
 
@@ -49,7 +49,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
     .maybeSingle();
 
   if (claimError) throw new Error("Could not claim order for fulfilment.");
-  if (!claim) return { alreadySubmitted: true };
+  if (!claim) return { alreadySubmitted: true, qikinkOrderId: order.qikink_order_id };
 
   const { data: items, error: itemsError } = await supabase
     .from("store_order_items")

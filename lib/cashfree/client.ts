@@ -29,9 +29,12 @@ export type CashfreeCreateOrderResult = {
 };
 
 export class CashfreeApiError extends Error {
-  constructor(message: string, public readonly retrySafe: boolean) {
+  readonly retrySafe: boolean;
+
+  constructor(message: string, retrySafe: boolean) {
     super(message);
     this.name = "CashfreeApiError";
+    this.retrySafe = retrySafe;
   }
 }
 

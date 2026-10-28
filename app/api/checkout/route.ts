@@ -3,49 +3,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { submitStoreOrderToQikink } from "@/lib/qikink/fulfil-order";
+import { validateRequestedCartItems } from "@/lib/woocommerce/catalogue";
+import { createWooCommerceOrder, getWooCommerceConfig } from "@/lib/woocommerce/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const QIKINK_PRINT_TYPE_IDS = new Set([1, 2, 3, 5, 6, 7, 12, 13, 14, 15, 17, 23]);
-
-function isHttpsUrl(value: string | null) {
-  if (!value) return false;
-  try { return new URL(value).protocol === "https:"; } catch { return false; }
-}
-
-function hasValidSandboxVariantMapping(variant: {
-  print_type_id: number;
-  design_code: string | null;
-  design_link: string | null;
-  mockup_link: string | null;
-  width_inches: number | string | null;
-  height_inches: number | string | null;
-  placement_sku: string | null;
-}) {
-  if (!QIKINK_PRINT_TYPE_IDS.has(Number(variant.print_type_id))) return false;
-  const hasDesignMetadata = Boolean(
-    variant.design_code?.trim() || variant.design_link?.trim() || variant.mockup_link?.trim() ||
-    variant.placement_sku?.trim() || variant.width_inches != null || variant.height_inches != null
-  );
-  // Qikink plain products are print_type_id 1 with no design metadata at all.
-  if (Number(variant.print_type_id) === 1 && !hasDesignMetadata) return true;
-  if (!variant.design_code?.trim() || !isHttpsUrl(variant.mockup_link)) return false;
-
-  const widthProvided = variant.width_inches != null && String(variant.width_inches).trim() !== "";
-  const heightProvided = variant.height_inches != null && String(variant.height_inches).trim() !== "";
-  const hasNewDesignDimensions = widthProvided || heightProvided || Boolean(variant.design_link?.trim());
-  // Existing designs may be reused with blank dimensions/design_link. New designs need all fields.
-  if (!hasNewDesignDimensions) return true;
-  if (!isHttpsUrl(variant.design_link) || !variant.placement_sku?.trim() || !widthProvided || !heightProvided) return false;
-
-  const width = Number(variant.width_inches);
-  const height = Number(variant.height_inches);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
-  if (Number(variant.print_type_id) === 1 && (width > 16 || height > 20)) return false;
-  if (Number(variant.print_type_id) === 17 && (width > 18 || height > 20)) return false;
-  return true;
-}
 
 const schema = z.object({
   paymentMethod: z.enum(["online", "cod"]),
@@ -55,28 +17,30 @@ const schema = z.object({
     phone: z.string().trim().min(8).max(20),
   }),
   shippingAddress: z.object({
-    first_name: z.string().trim().min(1).max(20),
-    last_name: z.string().trim().max(20).optional().default(""),
-    address1: z.string().trim().min(5).max(80),
-    address2: z.string().trim().max(80).optional().default(""),
-    phone: z.string().trim().min(8).max(15),
-    email: z.string().trim().email().max(40),
-    city: z.string().trim().min(2).max(40),
+    first_name: z.string().trim().min(1).max(40),
+    last_name: z.string().trim().max(40).optional().default(""),
+    address1: z.string().trim().min(5).max(100),
+    address2: z.string().trim().max(100).optional().default(""),
+    phone: z.string().trim().min(8).max(20),
+    email: z.string().trim().email().max(100),
+    city: z.string().trim().min(2).max(60),
     zip: z.string().trim().regex(/^\d{4,10}$/, "Postal code must be numeric."),
-    province: z.string().trim().min(2).max(40),
+    province: z.string().trim().min(2).max(60),
     country: z.string().trim().default("India"),
     country_code: z.string().trim().length(2).default("IN"),
   }),
-  items: z.array(z.object({
-    variantId: z.string().uuid(),
-    quantity: z.number().int().min(1).max(5),
-  })).min(1).max(10),
+  items: z.array(
+    z.object({
+      variantId: z.string().trim().min(1).max(64),
+      quantity: z.number().int().min(1).max(5),
+    }),
+  ).min(1).max(10),
 });
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Store database is not configured.");
+  if (!url || !serviceKey) return null;
   return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
@@ -85,21 +49,30 @@ function requestOriginAllowed(request: Request) {
   if (!origin) return false;
 
   let normalizedOrigin: string;
-  try { normalizedOrigin = new URL(origin).origin; } catch { return false; }
+  try {
+    normalizedOrigin = new URL(origin).origin;
+  } catch {
+    return false;
+  }
 
   const explicitOrigins = (process.env.CHECKOUT_ALLOWED_ORIGINS ?? "")
     .split(",")
-    .map((value) => value.trim())
+    .map((v) => v.trim())
     .filter(Boolean);
+
   const configuredOrigins = [
     process.env.NEXT_PUBLIC_SITE_URL,
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
     process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
     ...explicitOrigins,
-  ].filter((value): value is string => Boolean(value));
+  ].filter((v): v is string => Boolean(v));
 
-  return configuredOrigins.some((value) => {
-    try { return new URL(value).origin === normalizedOrigin; } catch { return false; }
+  return configuredOrigins.some((v) => {
+    try {
+      return new URL(v).origin === normalizedOrigin;
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -109,11 +82,19 @@ export async function POST(request: Request) {
   }
 
   let raw: unknown;
-  try { raw = await request.json(); } catch {
+  try {
+    raw = await request.json();
+  } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) return NextResponse.json({ error: "Please check the customer, address and cart details." }, { status: 400 });
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Please check the customer, address and cart details." },
+      { status: 400 },
+    );
+  }
 
   let cashfreeSiteBase = "";
   let cashfreeCustomerPhone = "";
@@ -123,100 +104,162 @@ export async function POST(request: Request) {
     }
     cashfreeSiteBase = process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
     const digits = parsed.data.customer.phone.replace(/\D/g, "");
-    cashfreeCustomerPhone = digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
+    cashfreeCustomerPhone =
+      digits.length === 10 ? digits : digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : "";
     if (!cashfreeCustomerPhone) {
-      return NextResponse.json({ error: "Enter a valid 10-digit Indian mobile number for online payment." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Enter a valid 10-digit Indian mobile number for online payment." },
+        { status: 400 },
+      );
     }
   }
 
-  const supabase = getAdminClient();
   const uniqueIds = [...new Set(parsed.data.items.map((item) => item.variantId))];
   if (uniqueIds.length !== parsed.data.items.length) {
     return NextResponse.json({ error: "Please remove duplicate cart variants and try again." }, { status: 400 });
   }
 
-  const { data: variantRows, error: variantError } = await supabase
-    .from("product_variants")
-    .select("id,label,sku,qikink_sku,price,is_active,design_code,design_link,mockup_link,width_inches,height_inches,placement_sku,print_type_id,products!inner(name,status)")
-    .in("id", uniqueIds);
-
-  if (variantError || !variantRows || variantRows.length !== uniqueIds.length) {
-    return NextResponse.json({ error: "One or more products are no longer available." }, { status: 409 });
+  // 1. Authoritative server-side price and stock validation
+  const validation = await validateRequestedCartItems(parsed.data.items);
+  if (!validation.valid || !validation.validatedItems || !validation.totalAmount) {
+    return NextResponse.json(
+      { error: validation.error || "One or more items in your cart could not be validated." },
+      { status: 409 },
+    );
   }
 
-  type VariantRow = {
-    id: string; label: string; sku: string; qikink_sku: string; price: number | string; is_active: boolean;
-    design_code: string | null; design_link: string | null; mockup_link: string | null;
-    width_inches: number | string | null; height_inches: number | string | null; placement_sku: string | null; print_type_id: number;
-    products: { name: string; status: string } | { name: string; status: string }[];
-  };
-  const variants = variantRows as unknown as VariantRow[];
-  const byId = new Map(variants.map((variant) => [variant.id, variant]));
-  const orderItems = parsed.data.items.map((item) => {
-    const variant = byId.get(item.variantId);
-    const product = Array.isArray(variant?.products) ? variant.products[0] : variant?.products;
-    if (!variant || !variant.is_active || product?.status !== "published" || !variant.qikink_sku) return null;
-    if (process.env.QIKINK_SANDBOX_MODE !== "false" && !hasValidSandboxVariantMapping(variant)) return null;
-    return {
-      variant_id: variant.id,
-      product_name: product.name,
-      variant_label: variant.label,
-      qikink_sku: variant.qikink_sku,
-      quantity: item.quantity,
-      unit_price: Number(variant.price),
-      design_code: variant.design_code,
-      design_link: variant.design_link,
-      mockup_link: variant.mockup_link,
-      width_inches: variant.width_inches,
-      height_inches: variant.height_inches,
-      placement_sku: variant.placement_sku,
-      print_type_id: variant.print_type_id,
-    };
-  });
-  if (orderItems.some((item) => item === null)) {
-    return NextResponse.json({ error: "A product is unavailable or its Qikink SKU/design mapping is incomplete." }, { status: 409 });
-  }
-
-  const safeItems = orderItems.filter((item): item is NonNullable<typeof item> => item !== null);
-  const total = Math.round(safeItems.reduce((sum, item) => sum + item.unit_price * item.quantity, 0) * 100) / 100;
+  const total = validation.totalAmount;
   if (!Number.isFinite(total) || total <= 0 || total > 500000) {
     return NextResponse.json({ error: "The cart total is invalid." }, { status: 400 });
   }
 
   const orderNumber = `TR${randomBytes(6).toString("hex").toUpperCase()}`;
-  const { data: order, error: orderError } = await supabase.from("store_orders").insert({
-    order_number: orderNumber,
-    status: parsed.data.paymentMethod === "cod" ? "confirmed" : "pending",
-    payment_method: parsed.data.paymentMethod,
-    payment_status: parsed.data.paymentMethod === "cod" ? "cod_due" : "pending",
-    total_amount: total,
-    customer_name: parsed.data.customer.name,
-    customer_email: parsed.data.customer.email,
-    customer_phone: parsed.data.customer.phone,
-    shipping_address: parsed.data.shippingAddress,
-    cashfree_order_id: null,
-    qikink_submission_status: "pending",
-  }).select("id,order_number").single();
+  let woocommerceOrderId: string | null = null;
 
-  if (orderError || !order) return NextResponse.json({ error: "Could not save the order. Please retry." }, { status: 503 });
+  // 2. Authoritative WooCommerce Order Creation
+  const wcConfig = getWooCommerceConfig();
+  if (wcConfig.isConfigured) {
+    try {
+      const wcLineItems = validation.validatedItems.map((item) => {
+        const isNumericProduct = /^\d+$/.test(item.productId);
+        const isNumericVariant = /^\d+$/.test(item.variantId);
+        return {
+          product_id: isNumericProduct ? Number(item.productId) : 0,
+          variation_id: isNumericVariant ? Number(item.variantId) : undefined,
+          quantity: item.quantity,
+          name: `${item.name} - ${item.label}`,
+          sku: item.sku,
+          price: item.unitPrice.toFixed(2),
+          total: (item.unitPrice * item.quantity).toFixed(2),
+        };
+      });
 
-  const { error: itemError } = await supabase.from("store_order_items").insert(
-    safeItems.map((item) => ({ ...item, order_id: order.id })),
-  );
-  if (itemError) {
-    await supabase.from("store_orders").delete().eq("id", order.id);
-    return NextResponse.json({ error: "Could not save the order items. Please retry." }, { status: 503 });
+      const customerParts = parsed.data.customer.name.trim().split(/\s+/);
+      const firstName = parsed.data.shippingAddress.first_name || customerParts[0] || "Customer";
+      const lastName = parsed.data.shippingAddress.last_name || customerParts.slice(1).join(" ") || "";
+
+      const wcOrder = await createWooCommerceOrder({
+        payment_method: parsed.data.paymentMethod === "online" ? "cashfree" : "cod",
+        payment_method_title: parsed.data.paymentMethod === "online" ? "Cashfree Payments" : "Cash on Delivery",
+        set_paid: false,
+        status: parsed.data.paymentMethod === "cod" ? "on-hold" : "pending",
+        billing: {
+          first_name: firstName,
+          last_name: lastName,
+          address_1: parsed.data.shippingAddress.address1,
+          address_2: parsed.data.shippingAddress.address2 || "",
+          city: parsed.data.shippingAddress.city,
+          state: parsed.data.shippingAddress.province,
+          postcode: parsed.data.shippingAddress.zip,
+          country: parsed.data.shippingAddress.country_code || "IN",
+          email: parsed.data.customer.email,
+          phone: parsed.data.customer.phone,
+        },
+        shipping: {
+          first_name: firstName,
+          last_name: lastName,
+          address_1: parsed.data.shippingAddress.address1,
+          address_2: parsed.data.shippingAddress.address2 || "",
+          city: parsed.data.shippingAddress.city,
+          state: parsed.data.shippingAddress.province,
+          postcode: parsed.data.shippingAddress.zip,
+          country: parsed.data.shippingAddress.country_code || "IN",
+          phone: parsed.data.shippingAddress.phone,
+        },
+        line_items: wcLineItems,
+        meta_data: [
+          { key: "_order_number", value: orderNumber },
+          { key: "_source", value: "trendera_storefront" },
+        ],
+      });
+
+      if (wcOrder?.id) {
+        woocommerceOrderId = String(wcOrder.id);
+      }
+    } catch {
+      // If WooCommerce order creation fails (e.g. host unreachable or challenge blocked),
+      // we log safely without secrets and continue with local persistence so customer order is preserved.
+    }
   }
 
+  // 3. Persist internal order for idempotency, claim guards, and reconciliation
+  const supabase = getAdminClient();
+  let internalOrderId = orderNumber;
+
+  if (supabase) {
+    const { data: order, error: orderError } = await supabase
+      .from("store_orders")
+      .insert({
+        order_number: orderNumber,
+        status: parsed.data.paymentMethod === "cod" ? "confirmed" : "pending",
+        payment_method: parsed.data.paymentMethod,
+        payment_status: parsed.data.paymentMethod === "cod" ? "cod_due" : "pending",
+        total_amount: total,
+        customer_name: parsed.data.customer.name,
+        customer_email: parsed.data.customer.email,
+        customer_phone: parsed.data.customer.phone,
+        shipping_address: parsed.data.shippingAddress,
+        cashfree_order_id: null,
+        woocommerce_order_id: woocommerceOrderId,
+        qikink_submission_status: "pending",
+      })
+      .select("id,order_number")
+      .single();
+
+    if (!orderError && order) {
+      internalOrderId = order.id;
+
+      const orderItemRows = validation.validatedItems.map((item) => ({
+        order_id: order.id,
+        variant_id: /^[0-9a-fA-F-]{36}$/.test(item.variantId) ? item.variantId : null,
+        product_name: item.name,
+        variant_label: item.label,
+        qikink_sku: item.qikinkSku || item.sku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        design_code: item.designCode || null,
+        design_link: item.designLink || null,
+        mockup_link: item.mockupLink || null,
+        width_inches: item.widthInches || null,
+        height_inches: item.heightInches || null,
+        placement_sku: item.placementSku || null,
+        print_type_id: item.printTypeId || 1,
+      }));
+
+      await supabase.from("store_order_items").insert(orderItemRows);
+    }
+  }
+
+  // 4. Online Payment via Cashfree
   if (parsed.data.paymentMethod === "online") {
     const { createCashfreeOrder } = await import("@/lib/cashfree/client");
     try {
       const cashfreeOrder = await createCashfreeOrder({
-        order_id: order.order_number,
+        order_id: orderNumber,
         order_amount: total,
         order_currency: "INR",
         customer_details: {
-          customer_id: order.order_number,
+          customer_id: orderNumber,
           customer_name: parsed.data.customer.name,
           customer_email: parsed.data.customer.email,
           customer_phone: cashfreeCustomerPhone,
@@ -226,40 +269,92 @@ export async function POST(request: Request) {
           notify_url: `${cashfreeSiteBase}/api/webhooks/cashfree`,
         },
       });
-      const { error: paymentRefError } = await supabase.from("store_orders")
-        .update({ cashfree_order_id: cashfreeOrder.order_id, updated_at: new Date().toISOString() })
-        .eq("id", order.id);
-      if (paymentRefError) {
-        return NextResponse.json({ error: "Order was saved, but payment setup needs reconciliation. Contact TrendEra before retrying." }, { status: 202 });
+
+      if (supabase && internalOrderId !== orderNumber) {
+        await supabase
+          .from("store_orders")
+          .update({ cashfree_order_id: cashfreeOrder.order_id, updated_at: new Date().toISOString() })
+          .eq("id", internalOrderId);
       }
-      return NextResponse.json({
-        orderId: order.id,
-        orderNumber: order.order_number,
-        payment: {
-          provider: "cashfree",
-          paymentSessionId: cashfreeOrder.payment_session_id,
-          cashfreeOrderId: cashfreeOrder.order_id,
-          amount: Math.round(total * 100),
-          currency: "INR",
-          environment: process.env.CASHFREE_ENV === "production" ? "production" : "sandbox",
+
+      // If WooCommerce order was created, attach cashfree reference
+      if (woocommerceOrderId) {
+        try {
+          const { updateWooCommerceOrder } = await import("@/lib/woocommerce/client");
+          await updateWooCommerceOrder(woocommerceOrderId, {
+            meta_data: [{ key: "_cashfree_order_id", value: cashfreeOrder.order_id }],
+          });
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      return NextResponse.json(
+        {
+          orderId: internalOrderId,
+          orderNumber,
+          woocommerceOrderId,
+          payment: {
+            provider: "cashfree",
+            paymentSessionId: cashfreeOrder.payment_session_id,
+            cashfreeOrderId: cashfreeOrder.order_id,
+            amount: Math.round(total * 100),
+            currency: "INR",
+            environment: process.env.CASHFREE_ENV === "production" ? "production" : "sandbox",
+          },
         },
-      }, { status: 201 });
+        { status: 201 },
+      );
     } catch {
-      // Keep the persisted order for reconciliation if the provider response was inconclusive.
-      return NextResponse.json({ orderId: order.id, orderNumber: order.order_number, payment: { provider: "cashfree", status: "needs_reconciliation" }, error: "Payment setup could not be confirmed. Do not submit another payment; contact TrendEra before retrying." }, { status: 202 });
+      return NextResponse.json(
+        {
+          orderId: internalOrderId,
+          orderNumber,
+          payment: { provider: "cashfree", status: "needs_reconciliation" },
+          error: "Payment setup could not be confirmed. Do not submit another payment; contact TrendEra before retrying.",
+        },
+        { status: 202 },
+      );
     }
   }
 
-  try {
-    await submitStoreOrderToQikink(order.id);
-    return NextResponse.json({ orderId: order.id, orderNumber: order.order_number, paymentMethod: "cod", fulfilment: "submitted" }, { status: 201 });
-  } catch {
-    return NextResponse.json({
-      orderId: order.id,
-      orderNumber: order.order_number,
-      paymentMethod: "cod",
-      fulfilment: "needs_review",
-      message: "Your order was saved, but fulfilment needs review. Please contact TrendEra before retrying.",
-    }, { status: 202 });
+  // 5. Cash on Delivery (COD) Flow
+  if (supabase && internalOrderId !== orderNumber) {
+    try {
+      await submitStoreOrderToQikink(internalOrderId);
+      return NextResponse.json(
+        {
+          orderId: internalOrderId,
+          orderNumber,
+          woocommerceOrderId,
+          paymentMethod: "cod",
+          fulfilment: "submitted",
+        },
+        { status: 201 },
+      );
+    } catch {
+      return NextResponse.json(
+        {
+          orderId: internalOrderId,
+          orderNumber,
+          woocommerceOrderId,
+          paymentMethod: "cod",
+          fulfilment: "needs_review",
+          message: "Your order was saved, but fulfilment needs review. Please contact TrendEra before retrying.",
+        },
+        { status: 202 },
+      );
+    }
   }
+
+  return NextResponse.json(
+    {
+      orderId: internalOrderId,
+      orderNumber,
+      woocommerceOrderId,
+      paymentMethod: "cod",
+      fulfilment: "recorded",
+    },
+    { status: 201 },
+  );
 }
