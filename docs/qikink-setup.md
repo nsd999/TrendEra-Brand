@@ -64,15 +64,23 @@ https://trenderabrand.store/api/webhooks/cashfree
 
 Subscribe to the Cashfree payment-success event. The webhook verifies the signature using the raw request body and timestamp, then independently queries Cashfree for the current order status and validates amount/currency before marking the order paid and attempting Qikink fulfilment. Configure the matching preview URL when testing in sandbox.
 
-## 5. Test before launch
+## 5. Live API Approval Requirement (3 Sandbox Test Orders)
 
-1. Keep sandbox mode enabled and live orders disabled.
-2. Check https://trenderabrand.vercel.app/api/qikink/status for environment/capability flags only; this endpoint does not call Qikink or expose secrets.
-3. Do not test order lookup in sandbox: the supplied Qikink specification states Get Order is unavailable there. After live API access is formally approved, configure QIKINK_ADMIN_API_TOKEN and call GET /api/qikink/orders with Authorization: Bearer <token>.
-4. After checkout UI is completed, test both online and COD orders with sandbox credentials and public design/mockup URLs.
-5. Confirm the Qikink order exists in the sandbox dashboard and that failed submissions are reviewed before retrying.
-6. Ask Qikink to approve live API access. Add the live secret, set QIKINK_SANDBOX_MODE=false, and only then set QIKINK_LIVE_ORDERS_ENABLED=true when ready to permit production submission.
-7. Place a low-value controlled live test before opening the store to customers.
+Qikink explicitly requires placing **at least 3 test orders** using the Sandbox API before they approve Live API credentials:
+> *"Your live API request was not approved. To get approved, please place at least 3 test orders using our Sandbox API, then click 'Request Live API Credentials' again."*
+
+We have included a dedicated automated helper to place these 3 test orders in one step:
+
+```bash
+# Run the automated 3-order sandbox verification script:
+node scripts/qikink-place-sandbox-test-orders.mjs <YOUR_SANDBOX_CLIENT_SECRET>
+```
+
+Once the 3 test orders are placed:
+1. Log in to [Qikink Open API Dashboard](https://dashboard.qikink.com/integrations/open_api).
+2. Click the orange **"Request Live API Credentials"** button.
+3. Once approved, copy your Live Client Secret into Vercel as `QIKINK_CLIENT_SECRET`.
+4. Set `QIKINK_SANDBOX_MODE=false` and `QIKINK_LIVE_ORDERS_ENABLED=true` when ready for production fulfillment.
 
 ## API specification used
 
