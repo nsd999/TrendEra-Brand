@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 const SANDBOX_BASE = "https://sandbox.qikink.com";
 const CLIENT_ID = process.env.QIKINK_CLIENT_ID?.trim() || "955328218983736";
 const CLIENT_SECRET = process.argv[2] || process.env.QIKINK_SANDBOX_SECRET?.trim();
-const BASE_SKU = process.argv[3] || process.env.QIKINK_SANDBOX_TEST_SKU?.trim() || "FS_RN_HS_CT_180_M_002"; // Standard Qikink Sandbox Round Neck Tee SKU
+const BASE_SKU = process.argv[3] || process.env.QIKINK_SANDBOX_TEST_SKU?.trim() || "USs-Wh-M"; // Verified Qikink Sandbox base garment SKU
 
 async function run() {
   console.log("=================================================");
@@ -69,7 +69,7 @@ async function run() {
   const results = [];
 
   for (let i = 1; i <= 3; i++) {
-    const orderNumber = `TR_SBX_${randomBytes(3).toString("hex").toUpperCase()}`;
+    const orderNumber = `TRSBX_${randomBytes(3).toString("hex").toUpperCase()}`; // Exactly 12 chars (<= 15 max)
     console.log(`\nSubmitting Order ${i}/3: ${orderNumber}...`);
 
     const payload = {
