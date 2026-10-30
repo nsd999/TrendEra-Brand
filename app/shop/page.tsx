@@ -1,11 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Shop", description: "Explore published TrendEra products." };
 
-type ProductRow = { id: string; name: string; description: string; product_variants?: { id: string; label: string; price: number | string; is_active: boolean }[] };
+type ProductRow = {
+  id: string;
+  name: string;
+  description: string;
+  category?: string;
+  image_url?: string;
+  product_variants?: { id: string; label: string; price: number | string; is_active: boolean }[];
+};
 
 async function getPublishedProducts(): Promise<ProductRow[]> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,7 +21,7 @@ async function getPublishedProducts(): Promise<ProductRow[]> {
   if (!url || !key) return [];
   const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await supabase.from("products")
-    .select("id,name,description,product_variants(id,label,price,is_active)")
+    .select("id,name,description,category,image_url,product_variants(id,label,price,is_active)")
     .eq("status", "published")
     .order("created_at", { ascending: true });
   if (error || !data) return [];
@@ -40,12 +48,28 @@ export default async function ShopPage() {
         <>
           <div className="my-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {products.map((product) => (
-              <article key={product.id} className="rounded-2xl border border-black/10 p-5">
-                <h2 className="text-xl font-semibold">{product.name}</h2>
-                {product.description && <p className="mt-2 text-sm leading-6 text-black/65">{product.description}</p>}
-                <div className="mt-4 space-y-2">
+              <article key={product.id} className="rounded-2xl border border-black/10 p-5 bg-white shadow-sm flex flex-col justify-between">
+                <div>
+                  {product.image_url && (
+                    <div className="relative mb-4 aspect-square w-full overflow-hidden rounded-xl bg-neutral-100">
+                      <Image
+                        src={product.image_url}
+                        alt={product.name}
+                        fill
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        className="object-cover"
+                      />
+                    </div>
+                  )}
+                  {product.category && (
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-black/50">{product.category}</span>
+                  )}
+                  <h2 className="text-xl font-semibold mt-1">{product.name}</h2>
+                  {product.description && <p className="mt-2 text-sm leading-6 text-black/65">{product.description}</p>}
+                </div>
+                <div className="mt-4 space-y-2 border-t border-black/10 pt-3">
                   {product.product_variants?.map((variant) => (
-                    <div key={variant.id} className="flex items-center justify-between gap-3 border-t border-black/10 pt-3 text-sm">
+                    <div key={variant.id} className="flex items-center justify-between gap-3 text-sm">
                       <span>{variant.label}</span><strong>₹{Number(variant.price).toFixed(2)}</strong>
                     </div>
                   ))}
