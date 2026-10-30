@@ -189,3 +189,4 @@ Unisex Terry Oversized Tee,Heavyweight French Terry,Oversized Tees,Black / L,L,B
   assert.equal(parsed[0].variants[0].cost_price, 633.20);
   assert.equal(parsed[0].variants[0].selling_price, 1499.00);
 });
+

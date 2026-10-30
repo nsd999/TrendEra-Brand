@@ -37,3 +37,4 @@ create index if not exists qikink_sync_logs_type_created_idx on public.qikink_sy
 
 -- 5. Enable RLS on qikink_sync_logs (server-authorized service role only)
 alter table public.qikink_sync_logs enable row level security;
+

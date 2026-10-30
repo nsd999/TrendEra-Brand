@@ -1148,3 +1148,4 @@ export default function QikinkAdminPage() {
     </main>
   );
 }
+
