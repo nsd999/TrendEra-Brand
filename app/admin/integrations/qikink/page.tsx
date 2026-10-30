@@ -85,10 +85,11 @@ export default function QikinkAdminPage() {
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Load token from localStorage on mount
+  // Load token from localStorage on mount (defaults to configured passcode)
   useEffect(() => {
-    const saved = localStorage.getItem("trendera_admin_token") || "";
+    const saved = localStorage.getItem("trendera_admin_token") || "01101919082008";
     setAdminToken(saved);
+    localStorage.setItem("trendera_admin_token", saved);
   }, []);
 
   const getHeaders = () => {
