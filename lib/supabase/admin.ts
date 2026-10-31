@@ -95,3 +95,4 @@ export function getStorefrontClient(): SupabaseClient | null {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+

@@ -13,3 +13,4 @@ export async function GET(request: Request) {
     serverConfigured: isServerConfigured,
   });
 }
+

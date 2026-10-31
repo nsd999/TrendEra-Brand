@@ -8,3 +8,4 @@ export async function POST() {
   response.cookies.delete("trendera_admin_session");
   return response;
 }
+

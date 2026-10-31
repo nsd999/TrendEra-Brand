@@ -159,3 +159,4 @@ create policy "active variants of published products readable" on public.product
   );
 
 -- All mutations and order records remain strictly service-role authorized (server only).
+
