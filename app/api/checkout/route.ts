@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
+import { getAdminClient } from "@/lib/supabase/admin";
 import { submitStoreOrderToQikink } from "@/lib/qikink/fulfil-order";
 
 export const runtime = "nodejs";
@@ -72,13 +72,6 @@ const schema = z.object({
     quantity: z.number().int().min(1).max(5),
   })).min(1).max(10),
 });
-
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Store database is not configured.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
 
 function requestOriginAllowed(request: Request) {
   const origin = request.headers.get("origin");

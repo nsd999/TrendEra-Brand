@@ -1,15 +1,8 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
-import { fetchCashfreeOrderStatus } from "./client";
-import { submitStoreOrderToQikink } from "@/lib/qikink/fulfil-order";
-
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Order storage is not configured.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
+import { getAdminClient } from "../supabase/admin.ts";
+import { fetchCashfreeOrderStatus } from "./client.ts";
+import { submitStoreOrderToQikink } from "../qikink/fulfil-order.ts";
 
 /**
  * Never trusts a browser redirect or webhook payload as proof of payment.

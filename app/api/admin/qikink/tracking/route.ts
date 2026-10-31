@@ -1,36 +1,44 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { isAuthorizedAdmin } from "@/lib/admin/auth";
+import { getAdminClient, inspectSupabaseConfig } from "@/lib/supabase/admin";
 import { syncAllActiveOrders, syncOrderTrackingFromQikink } from "@/lib/qikink/client";
 import { submitStoreOrderToQikink } from "@/lib/qikink/fulfil-order";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
-
 export async function GET(request: Request) {
   if (!(await isAuthorizedAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized admin access." }, { status: 401 });
   }
 
-  const supabase = getAdminClient();
-  const { data: orders, error } = await supabase
-    .from("store_orders")
-    .select("id,order_number,status,payment_method,payment_status,total_amount,currency,customer_name,customer_email,customer_phone,cashfree_order_id,qikink_order_id,qikink_submission_status,qikink_status,qikink_awb,qikink_courier,qikink_tracking_url,qikink_synced_at,qikink_last_error,created_at,store_order_items(product_name,variant_label,qikink_sku,quantity,unit_price)")
-    .order("created_at", { ascending: false })
-    .limit(50);
-
-  if (error) {
-    return NextResponse.json({ error: `Database error: ${error.message}` }, { status: 500 });
+  const config = inspectSupabaseConfig();
+  if (!config.hasUrl || !config.hasServiceRoleKey) {
+    return NextResponse.json({
+      orders: [],
+      configurationError: `Supabase server configuration is missing: ${config.missingVariables.join(", ")}.`,
+    });
   }
 
-  return NextResponse.json({ orders: orders ?? [] });
+  try {
+    const supabase = getAdminClient();
+    const { data: orders, error } = await supabase
+      .from("store_orders")
+      .select("id,order_number,status,payment_method,payment_status,total_amount,currency,customer_name,customer_email,customer_phone,cashfree_order_id,qikink_order_id,qikink_submission_status,qikink_status,qikink_awb,qikink_courier,qikink_tracking_url,qikink_synced_at,qikink_last_error,created_at,store_order_items(product_name,variant_label,qikink_sku,quantity,unit_price)")
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      return NextResponse.json({ orders: [], configurationError: `Database error: ${error.message}` });
+    }
+
+    return NextResponse.json({ orders: orders ?? [] });
+  } catch (err) {
+    return NextResponse.json({
+      orders: [],
+      configurationError: err instanceof Error ? err.message : "Database connection failed",
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -86,4 +94,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

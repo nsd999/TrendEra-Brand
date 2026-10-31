@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { getAdminClient } from "../supabase/admin.ts";
 import { getAccessToken, getQikinkBaseUrl, getQikinkCredentials, getQikinkMode } from "./authentication.ts";
 import { QikinkOrderError, QikinkValidationError } from "./errors.ts";
 import type {
@@ -63,13 +63,6 @@ const QIKINK_ORDER_FIELDS = new Set([
   "shipping",
   "line_items",
 ]);
-
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
 
 export async function getQikinkOrderList(query: QikinkOrderListQuery = {}): Promise<QikinkOrderListResponse> {
   const mode = getQikinkMode();
@@ -269,7 +262,7 @@ export async function syncAllActiveOrders(): Promise<{
       details: { ordersChecked: orders.length, ordersUpdated: synced },
     });
   } catch {
-    // Ignore logging failures
+    // Non-blocking
   }
 
   return { total: orders.length, synced, results };

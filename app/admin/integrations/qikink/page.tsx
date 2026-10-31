@@ -3,7 +3,19 @@
 import { useEffect, useState, useTransition } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import type { QikinkProductImportItem, QikinkProductImportVariant } from "@/lib/qikink/types";
+import type { QikinkProductImportItem } from "@/lib/qikink/types";
+
+type TabId =
+  | "overview"
+  | "connection"
+  | "import"
+  | "catalogue"
+  | "variants"
+  | "categories"
+  | "fulfillment"
+  | "tracking"
+  | "history"
+  | "diagnostics";
 
 type ConnectionStatus = {
   connected: boolean;
@@ -36,6 +48,8 @@ type DbProduct = {
     price: number;
     cost_price?: number;
     mockup_link?: string;
+    width_inches?: number | string | null;
+    height_inches?: number | string | null;
     is_active: boolean;
   }>;
 };
@@ -70,95 +84,174 @@ type StoreOrder = {
   }>;
 };
 
+type SyncLog = {
+  id: string;
+  sync_type: string;
+  status: string;
+  items_count: number;
+  details: Record<string, unknown>;
+  error_message?: string;
+  created_at: string;
+};
+
+type DiagnosticItem = {
+  name: string;
+  status: string;
+  healthy: boolean;
+  message: string;
+  latencyMs?: number;
+  details?: Record<string, unknown>;
+  remediation?: string;
+};
+
+type DiagnosticsResponse = {
+  timestamp: string;
+  allHealthy: boolean;
+  checks: Record<string, DiagnosticItem>;
+};
+
 export default function QikinkAdminPage() {
-  const [adminToken, setAdminToken] = useState("");
-  const [activeTab, setActiveTab] = useState<"products" | "orders" | "capabilities">("products");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+
   const [connection, setConnection] = useState<ConnectionStatus | null>(null);
   const [dbProducts, setDbProducts] = useState<DbProduct[]>([]);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [presetTemplates, setPresetTemplates] = useState<QikinkProductImportItem[]>([]);
+  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+
   const [selectedProductNames, setSelectedProductNames] = useState<Set<string>>(new Set());
-  const [previewProduct, setPreviewProduct] = useState<QikinkProductImportItem | null>(null);
   const [csvInput, setCsvInput] = useState("");
-  const [showCsvModal, setShowCsvModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Load token from localStorage on mount (defaults to configured passcode)
+  // Check authentication status on mount
   useEffect(() => {
-    const saved = localStorage.getItem("trendera_admin_token") || "01101919082008";
-    setAdminToken(saved);
-    localStorage.setItem("trendera_admin_token", saved);
+    checkAuthStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const getHeaders = () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (adminToken) {
-      headers["Authorization"] = `Bearer ${adminToken}`;
-      headers["x-admin-token"] = adminToken;
+  const checkAuthStatus = async () => {
+    try {
+      const res = await fetch("/api/admin/auth/status");
+      const data = await res.json();
+      setIsAuthenticated(data.authenticated);
+      if (data.authenticated) {
+        loadData();
+      }
+    } catch {
+      setIsAuthenticated(false);
     }
-    return headers;
   };
 
-  const saveAdminToken = (token: string) => {
-    setAdminToken(token);
-    localStorage.setItem("trendera_admin_token", token);
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    try {
+      const res = await fetch("/api/admin/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: passcodeInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsAuthenticated(true);
+        setPasscodeInput("");
+        loadData();
+      } else {
+        setLoginError(data.error || "Authentication failed.");
+      }
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Network error.");
+    }
   };
 
-  // Initial load
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken]);
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/auth/logout", { method: "POST" });
+      setIsAuthenticated(false);
+      setStatusMessage({ text: "Logged out successfully.", type: "info" });
+    } catch {
+      setIsAuthenticated(false);
+    }
+  };
 
   const loadData = async () => {
     try {
-      const res = await fetch("/api/admin/qikink/products", { headers: getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setDbProducts(data.storeProducts || []);
-        setPresetTemplates(data.presetTemplates || []);
+      const pRes = await fetch("/api/admin/qikink/products");
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        setDbProducts(pData.storeProducts || []);
+        setPresetTemplates(pData.presetTemplates || []);
+        setSyncLogs(pData.recentLogs || []);
+        if (pData.configurationError) {
+          setConfigError(pData.configurationError);
+        } else {
+          setConfigError(null);
+        }
       }
     } catch {
-      // Ignore initial silent fail
+      // Handled silently
     }
 
     try {
-      const oRes = await fetch("/api/admin/qikink/tracking", { headers: getHeaders() });
+      const oRes = await fetch("/api/admin/qikink/tracking");
       if (oRes.ok) {
         const oData = await oRes.json();
         setOrders(oData.orders || []);
       }
     } catch {
-      // Ignore
+      // Handled silently
     }
+  };
+
+  const runDiagnostics = () => {
+    startTransition(async () => {
+      setStatusMessage({ text: "Executing comprehensive 11-point system probe...", type: "info" });
+      try {
+        const res = await fetch("/api/admin/diagnostics");
+        const data = (await res.json()) as DiagnosticsResponse;
+        setDiagnostics(data);
+        if (data.allHealthy) {
+          setStatusMessage({ text: "All 11 diagnostic checks passed successfully!", type: "success" });
+        } else {
+          setStatusMessage({
+            text: "Diagnostics complete: Issues detected. Review the Diagnostics tab for remediation instructions.",
+            type: "error",
+          });
+        }
+      } catch (err) {
+        setStatusMessage({ text: `Diagnostic execution error: ${err instanceof Error ? err.message : "Failed"}`, type: "error" });
+      }
+    });
   };
 
   const handleTestConnection = () => {
     startTransition(async () => {
       setStatusMessage({ text: "Testing Qikink Live API connection...", type: "info" });
       try {
-        const res = await fetch("/api/admin/qikink/test-connection", {
-          method: "POST",
-          headers: getHeaders(),
-        });
+        const res = await fetch("/api/admin/qikink/test-connection", { method: "POST" });
         const data = await res.json();
         setConnection(data);
         if (data.connected && data.authenticated) {
           setStatusMessage({
-            text: `Connection verified! Mode: ${data.mode.toUpperCase()} (Latency: ${data.latencyMs}ms)`,
+            text: `Qikink API active! Mode: ${data.mode.toUpperCase()} (Latency: ${data.latencyMs ?? 0}ms)`,
             type: "success",
           });
         } else {
           setStatusMessage({
-            text: `Connection failed: ${data.error || "Could not authenticate"}`,
+            text: `Qikink connection failed: ${data.error || "Authentication probe failed"}`,
             type: "error",
           });
         }
       } catch (err) {
         setStatusMessage({
-          text: `Error testing connection: ${err instanceof Error ? err.message : "Network error"}`,
+          text: `Qikink probe error: ${err instanceof Error ? err.message : "Network error"}`,
           type: "error",
         });
       }
@@ -168,16 +261,16 @@ export default function QikinkAdminPage() {
   const handlePushSelected = () => {
     const toPush = presetTemplates.filter((p) => selectedProductNames.has(p.name));
     if (toPush.length === 0) {
-      setStatusMessage({ text: "Select at least one product to push.", type: "error" });
+      setStatusMessage({ text: "Select at least one product to publish.", type: "error" });
       return;
     }
 
     startTransition(async () => {
-      setStatusMessage({ text: `Pushing ${toPush.length} product(s) to TrendEra database...`, type: "info" });
+      setStatusMessage({ text: `Publishing ${toPush.length} product(s) to TrendEra catalogue...`, type: "info" });
       try {
         const res = await fetch("/api/admin/qikink/products", {
           method: "POST",
-          headers: getHeaders(),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "push_to_trendera",
             products: toPush,
@@ -188,80 +281,90 @@ export default function QikinkAdminPage() {
         const data = await res.json();
         if (data.success) {
           setStatusMessage({
-            text: `Successfully pushed! Created: ${data.result.createdProducts}, Updated: ${data.result.updatedProducts}, Variants: ${data.result.createdVariants}`,
+            text: `Successfully published! Created: ${data.result.createdProducts}, Updated: ${data.result.updatedProducts}, Variants: ${data.result.createdVariants}`,
             type: "success",
           });
           await loadData();
         } else {
-          setStatusMessage({ text: `Push failed: ${data.error || data.result?.errors?.join("; ")}`, type: "error" });
+          setStatusMessage({
+            text: `Publication failed: ${data.error || data.result?.errors?.join("; ") || "Unknown error"}`,
+            type: "error",
+          });
         }
       } catch (err) {
-        setStatusMessage({ text: `Push error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
+        setStatusMessage({ text: `Publish error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
       }
     });
   };
 
-  const handleImportPresets = () => {
+  const handlePushSingle = (product: QikinkProductImportItem) => {
     startTransition(async () => {
-      setStatusMessage({ text: "Importing preset catalogue templates from Qikink...", type: "info" });
+      setStatusMessage({ text: `Publishing '${product.name}' to TrendEra catalogue...`, type: "info" });
       try {
         const res = await fetch("/api/admin/qikink/products", {
           method: "POST",
-          headers: getHeaders(),
-          body: JSON.stringify({ action: "import_presets", preserveExistingPrices: true, status: "published" }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "push_to_trendera",
+            product,
+            preserveExistingPrices: true,
+            status: "published",
+          }),
         });
         const data = await res.json();
-        if (data.success) {
+        if (data.success && data.result) {
+          const v = data.result;
           setStatusMessage({
-            text: `Preset catalogue imported to TrendEra! (Created: ${data.result.createdProducts}, Updated: ${data.result.updatedProducts})`,
+            text: `Verified database write! '${v.name}' published (${v.validSkusCount}/${v.variantsCount} verified SKUs).`,
             type: "success",
           });
           await loadData();
         } else {
-          setStatusMessage({ text: `Import failed: ${data.error}`, type: "error" });
+          setStatusMessage({ text: `Publication failed: ${data.error || "Database rejection"}`, type: "error" });
         }
       } catch (err) {
-        setStatusMessage({ text: `Import error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
+        setStatusMessage({ text: `Publication error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
       }
     });
   };
 
-  const handleImportCsv = () => {
+  const handleParseCsv = () => {
     if (!csvInput.trim()) {
-      setStatusMessage({ text: "Paste CSV content first.", type: "error" });
+      setStatusMessage({ text: "Please paste CSV content first.", type: "error" });
       return;
     }
-
     startTransition(async () => {
-      setStatusMessage({ text: "Parsing CSV products...", type: "info" });
       try {
         const res = await fetch("/api/admin/qikink/products", {
           method: "POST",
-          headers: getHeaders(),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "import_csv", csvContent: csvInput }),
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.products)) {
           setPresetTemplates((prev) => [...data.products, ...prev]);
-          setShowCsvModal(false);
           setCsvInput("");
-          setStatusMessage({ text: `Parsed ${data.count} product(s) from CSV! You can now preview and push them.`, type: "success" });
+          setStatusMessage({
+            text: `Successfully parsed and validated ${data.count} product(s) from CSV! You can now review and publish them.`,
+            type: "success",
+          });
+          setActiveTab("catalogue");
         } else {
-          setStatusMessage({ text: `CSV error: ${data.error}`, type: "error" });
+          setStatusMessage({ text: `CSV validation error: ${data.error}`, type: "error" });
         }
       } catch (err) {
-        setStatusMessage({ text: `CSV parse error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
+        setStatusMessage({ text: `CSV parsing error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
       }
     });
   };
 
   const handleSyncTrackingAll = () => {
     startTransition(async () => {
-      setStatusMessage({ text: "Syncing tracking details from Qikink for active orders...", type: "info" });
+      setStatusMessage({ text: "Syncing tracking details from Qikink for all active orders...", type: "info" });
       try {
         const res = await fetch("/api/admin/qikink/tracking", {
           method: "POST",
-          headers: getHeaders(),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "sync_all" }),
         });
         const data = await res.json();
@@ -275,7 +378,7 @@ export default function QikinkAdminPage() {
           setStatusMessage({ text: `Tracking sync failed: ${data.error}`, type: "error" });
         }
       } catch (err) {
-        setStatusMessage({ text: `Tracking sync error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
+        setStatusMessage({ text: `Tracking error: ${err instanceof Error ? err.message : "Error"}`, type: "error" });
       }
     });
   };
@@ -285,7 +388,7 @@ export default function QikinkAdminPage() {
       try {
         const res = await fetch("/api/admin/qikink/tracking", {
           method: "POST",
-          headers: getHeaders(),
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "sync_order", orderId }),
         });
         const data = await res.json();
@@ -293,44 +396,12 @@ export default function QikinkAdminPage() {
           setStatusMessage({ text: `Order updated! Status: ${data.result.status || "Synced"}`, type: "success" });
           await loadData();
         } else {
-          setStatusMessage({ text: `Sync status: ${data.result?.error || data.error || "No update found"}`, type: "error" });
+          setStatusMessage({ text: `Sync note: ${data.result?.error || data.error || "No update found"}`, type: "error" });
         }
       } catch (err) {
-        setStatusMessage({ text: `Error: ${err instanceof Error ? err.message : "Failed"}`, type: "error" });
+        setStatusMessage({ text: `Sync error: ${err instanceof Error ? err.message : "Failed"}`, type: "error" });
       }
     });
-  };
-
-  const handleRetryFulfilment = (orderId: string) => {
-    startTransition(async () => {
-      setStatusMessage({ text: "Submitting order to Qikink...", type: "info" });
-      try {
-        const res = await fetch("/api/admin/qikink/tracking", {
-          method: "POST",
-          headers: getHeaders(),
-          body: JSON.stringify({ action: "retry_fulfilment", orderId }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setStatusMessage({ text: `Fulfilment order accepted by Qikink! Order ID: ${data.result.qikinkOrderId}`, type: "success" });
-          await loadData();
-        } else {
-          setStatusMessage({ text: `Fulfilment failed: ${data.error}`, type: "error" });
-        }
-      } catch (err) {
-        setStatusMessage({ text: `Error: ${err instanceof Error ? err.message : "Failed"}`, type: "error" });
-      }
-    });
-  };
-
-  const toggleSelectProduct = (name: string) => {
-    const next = new Set(selectedProductNames);
-    if (next.has(name)) {
-      next.delete(name);
-    } else {
-      next.add(name);
-    }
-    setSelectedProductNames(next);
   };
 
   const toggleSelectAll = () => {
@@ -341,6 +412,13 @@ export default function QikinkAdminPage() {
     }
   };
 
+  const toggleSelectProduct = (name: string) => {
+    const next = new Set(selectedProductNames);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setSelectedProductNames(next);
+  };
+
   const filteredPresets = presetTemplates.filter(
     (p) =>
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -348,58 +426,159 @@ export default function QikinkAdminPage() {
       p.variants.some((v) => v.sku.toLowerCase().includes(searchTerm.toLowerCase()) || v.qikink_sku.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
+  // Unauthenticated screen
+  if (isAuthenticated === false) {
+    return (
+      <main className="min-h-screen bg-[#050505] text-[#f7f7f7] flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-[#202020] bg-[#0d0d0d] p-8 shadow-2xl">
+          <div className="flex items-center gap-3 mb-6">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-black font-extrabold text-lg">
+              T
+            </span>
+            <div>
+              <h1 className="text-lg font-bold tracking-tight text-white">TrendEra Admin</h1>
+              <p className="text-xs text-neutral-400">Qikink Integration &amp; Fulfillment Portal</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs uppercase tracking-widest text-neutral-400 font-semibold mb-2">
+                Admin Passcode
+              </label>
+              <input
+                type="password"
+                placeholder="Enter server admin passcode"
+                value={passcodeInput}
+                onChange={(e) => setPasscodeInput(e.target.value)}
+                className="w-full rounded-xl border border-[#292929] bg-[#141414] px-4 py-3 text-sm text-white placeholder-neutral-500 focus:border-white focus:outline-none transition"
+                autoFocus
+              />
+            </div>
+
+            {loginError && (
+              <div className="rounded-xl border border-rose-900/50 bg-rose-950/40 p-3 text-xs text-rose-300">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isPending || !passcodeInput.trim()}
+              className="w-full rounded-xl bg-white px-4 py-3 text-xs font-bold uppercase tracking-widest text-black hover:bg-neutral-200 transition disabled:opacity-50 cursor-pointer"
+            >
+              Unlock Dashboard
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-[11px] text-neutral-500">
+            Protected by server-side HMAC session cookies. Configured via QIKINK_ADMIN_API_TOKEN.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  // Loading state
+  if (isAuthenticated === null) {
+    return (
+      <main className="min-h-screen bg-[#050505] text-[#f7f7f7] flex items-center justify-center p-4">
+        <div className="text-center space-y-3">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          <p className="text-xs text-neutral-400 tracking-wider uppercase font-semibold">Verifying session...</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-neutral-50 text-neutral-900 pb-20 font-sans">
+    <main className="min-h-screen bg-[#050505] text-[#f7f7f7] pb-24 font-sans selection:bg-neutral-800">
       {/* Top Header */}
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+      <header className="border-b border-[#202020] bg-[#0a0a0a]/90 backdrop-blur sticky top-0 z-40">
+        <div className="mx-auto max-w-7xl px-4 py-3.5 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-black text-white font-bold text-lg">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black font-extrabold text-base">
                 T
               </span>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold tracking-tight text-neutral-900">TrendEra × Qikink</h1>
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                  <h1 className="text-base font-bold tracking-tight text-white">TrendEra × Qikink</h1>
+                  <span className="rounded-full bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400">
                     Direct Open API
                   </span>
                 </div>
-                <p className="text-xs text-neutral-500">
-                  Print-on-Demand Automation &amp; Fulfillment Center · Standalone Integration (No WooCommerce / No WP)
+                <p className="text-[11px] text-neutral-400">
+                  Custom Architecture · Standalone Integration (No WooCommerce / No WP)
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="flex items-center rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs shadow-sm">
-                <span className="text-neutral-500 mr-2">Admin Key:</span>
-                <input
-                  type="password"
-                  placeholder="Set QIKINK_ADMIN_API_TOKEN"
-                  value={adminToken}
-                  onChange={(e) => saveAdminToken(e.target.value)}
-                  className="w-36 bg-transparent outline-none placeholder:text-neutral-400"
-                />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={runDiagnostics}
+                disabled={isPending}
+                className="inline-flex items-center rounded-xl border border-[#333] bg-[#141414] px-3.5 py-2 text-xs font-semibold text-neutral-200 hover:bg-[#1a1a1a] hover:border-neutral-400 transition cursor-pointer"
+              >
+                Run Diagnostics ⚙
+              </button>
 
               <button
                 type="button"
                 onClick={handleTestConnection}
                 disabled={isPending}
-                className="inline-flex items-center rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 transition disabled:opacity-50"
+                className="inline-flex items-center rounded-xl bg-white px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
               >
-                {isPending ? "Connecting..." : "Test Connection"}
+                {isPending ? "Probing..." : "Test Connection"}
               </button>
 
               <Link
                 href="/shop"
                 target="_blank"
-                className="inline-flex items-center rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50 transition"
+                className="inline-flex items-center rounded-xl border border-[#333] bg-[#141414] px-3.5 py-2 text-xs font-semibold text-neutral-200 hover:bg-[#1a1a1a] transition"
               >
-                View Live Store ↗
+                View Store ↗
               </Link>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center rounded-xl border border-neutral-800 bg-transparent px-3 py-2 text-xs text-neutral-400 hover:text-white hover:border-neutral-600 transition cursor-pointer"
+                title="Lock session"
+              >
+                Sign Out
+              </button>
             </div>
+          </div>
+
+          {/* Navigation Tabs */}
+          <div className="mt-4 flex gap-1 overflow-x-auto border-t border-[#1a1a1a] pt-2 scrollbar-none">
+            {[
+              { id: "overview", label: "1. Overview" },
+              { id: "connection", label: "2. Qikink Connection" },
+              { id: "import", label: "3. Product Import" },
+              { id: "catalogue", label: "4. Catalogue" },
+              { id: "variants", label: "5. Variants & SKUs" },
+              { id: "categories", label: "6. Categories" },
+              { id: "fulfillment", label: "7. Order Fulfillment" },
+              { id: "tracking", label: "8. Tracking" },
+              { id: "history", label: "9. Sync History" },
+              { id: "diagnostics", label: "10. Diagnostics" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as TabId)}
+                className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  activeTab === tab.id
+                    ? "bg-white text-black"
+                    : "text-neutral-400 hover:text-white hover:bg-[#151515]"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
       </header>
@@ -408,541 +587,476 @@ export default function QikinkAdminPage() {
         {/* Status Notification Banner */}
         {statusMessage && (
           <div
-            className={`rounded-2xl p-4 text-sm flex items-center justify-between border ${
+            className={`rounded-xl p-4 text-xs flex items-center justify-between border ${
               statusMessage.type === "success"
-                ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                ? "bg-emerald-950/40 text-emerald-300 border-emerald-800/60"
                 : statusMessage.type === "error"
-                  ? "bg-rose-50 text-rose-900 border-rose-200"
-                  : "bg-blue-50 text-blue-900 border-blue-200"
+                  ? "bg-rose-950/40 text-rose-300 border-rose-800/60"
+                  : "bg-blue-950/40 text-blue-300 border-blue-800/60"
             }`}
           >
             <span>{statusMessage.text}</span>
             <button
               type="button"
               onClick={() => setStatusMessage(null)}
-              className="text-xs font-bold opacity-60 hover:opacity-100"
+              className="text-xs opacity-70 hover:opacity-100 cursor-pointer ml-3"
             >
               ✕
             </button>
           </div>
         )}
 
-        {/* Section A: Connection Overview Card */}
-        <section className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-100 pb-4">
+        {/* Configuration Error Banner */}
+        {configError && (
+          <div className="rounded-xl border border-amber-800/60 bg-amber-950/30 p-4 text-xs text-amber-300 flex items-start justify-between">
             <div>
-              <h2 className="text-base font-semibold text-neutral-900">Connection &amp; API Health Overview</h2>
-              <p className="text-xs text-neutral-500">Live Qikink Open API status &amp; authentication credentials</p>
+              <strong className="font-semibold block mb-1">Configuration Required:</strong>
+              <p>{configError}</p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-neutral-100 text-neutral-800">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                Mode: {connection?.mode?.toUpperCase() || (process.env.NEXT_PUBLIC_STORE_MODE === "live" ? "LIVE" : "SANDBOX / LIVE")}
-              </span>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-                  connection?.connected ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-700"
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${connection?.connected ? "bg-emerald-500" : "bg-neutral-400"}`} />
-                {connection?.connected ? "API Connected (HTTP 200)" : "Click 'Test Connection'"}
-              </span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("diagnostics")}
+              className="text-[11px] underline ml-4 hover:text-white cursor-pointer"
+            >
+              View Diagnostics →
+            </button>
           </div>
+        )}
 
-          <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Environment</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">{connection?.mode || "Live Open API"}</p>
-            </div>
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Auth Health</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">
-                {connection?.authenticated ? "Valid Token" : "Ready"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">API Latency</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">
-                {connection?.latencyMs ? `${connection.latencyMs} ms` : "—"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Live Published</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">
-                {dbProducts.filter((p) => p.status === "published").length} Products
-              </p>
-            </div>
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Total Variants</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">
-                {dbProducts.reduce((sum, p) => sum + (p.product_variants?.length || 0), 0)} SKUs
-              </p>
-            </div>
-            <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-3.5">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Orders Fulfilled</span>
-              <p className="mt-1 text-sm font-semibold text-neutral-900">
-                {orders.filter((o) => o.qikink_submission_status === "submitted").length} Orders
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Navigation Tabs */}
-        <div className="border-b border-neutral-200">
-          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-            <button
-              type="button"
-              onClick={() => setActiveTab("products")}
-              className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-semibold transition ${
-                activeTab === "products"
-                  ? "border-black text-black"
-                  : "border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700"
-              }`}
-            >
-              Product &amp; SKU Management ({presetTemplates.length} Available · {dbProducts.length} in DB)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("orders")}
-              className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-semibold transition ${
-                activeTab === "orders"
-                  ? "border-black text-black"
-                  : "border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700"
-              }`}
-            >
-              Order Fulfillment &amp; Tracking ({orders.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("capabilities")}
-              className={`whitespace-nowrap border-b-2 py-3 px-1 text-sm font-semibold transition ${
-                activeTab === "capabilities"
-                  ? "border-black text-black"
-                  : "border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700"
-              }`}
-            >
-              API Capability Matrix &amp; Audit Logs
-            </button>
-          </nav>
-        </div>
-
-        {/* TAB 1: PRODUCTS & CATALOGUE MANAGEMENT */}
-        {activeTab === "products" && (
+        {/* TAB 1: OVERVIEW */}
+        {activeTab === "overview" && (
           <div className="space-y-6">
-            {/* Primary Action Buttons (Section C) */}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-5">
+                <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">Store Catalogue</span>
+                <div className="mt-2 text-2xl font-bold text-white">{dbProducts.length}</div>
+                <p className="mt-1 text-xs text-neutral-500">Products saved in Supabase database</p>
+              </div>
+
+              <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-5">
+                <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">Published Live</span>
+                <div className="mt-2 text-2xl font-bold text-emerald-400">
+                  {dbProducts.filter((p) => p.status === "published").length}
+                </div>
+                <p className="mt-1 text-xs text-neutral-500">Active products visible on /shop</p>
+              </div>
+
+              <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-5">
+                <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">Ready Candidates</span>
+                <div className="mt-2 text-2xl font-bold text-white">{presetTemplates.length}</div>
+                <p className="mt-1 text-xs text-neutral-500">Preset Qikink templates verified</p>
+              </div>
+
+              <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-5">
+                <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">Customer Orders</span>
+                <div className="mt-2 text-2xl font-bold text-white">{orders.length}</div>
+                <p className="mt-1 text-xs text-neutral-500">Total recorded store orders</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Quick Actions</h2>
+              <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
                   onClick={handlePushSelected}
                   disabled={isPending || selectedProductNames.size === 0}
-                  className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 transition disabled:opacity-50"
+                  className="rounded-xl bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
                 >
-                  Push to TrendEra ({selectedProductNames.size})
+                  Publish Selected ({selectedProductNames.size})
                 </button>
-                <button
-                  type="button"
-                  onClick={handleImportPresets}
-                  disabled={isPending}
-                  className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50 transition"
-                >
-                  Import Presets from Qikink
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCsvModal(true)}
-                  className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50 transition"
-                >
-                  Import from CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePushSelected()}
-                  disabled={isPending}
-                  className="rounded-xl border border-neutral-200 bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
-                >
-                  Update from Qikink
-                </button>
+
                 <button
                   type="button"
                   onClick={() => {
-                    const mappings: Record<string, string> = {};
-                    dbProducts.forEach((p) => {
-                      if (p.category) mappings[p.id] = p.category;
-                    });
-                    startTransition(async () => {
-                      await fetch("/api/admin/qikink/products", {
-                        method: "POST",
-                        headers: getHeaders(),
-                        body: JSON.stringify({ action: "sync_categories", categories: mappings }),
-                      });
-                      setStatusMessage({ text: "Categories synchronized successfully.", type: "success" });
-                    });
+                    setSelectedProductNames(new Set(presetTemplates.map((p) => p.name)));
+                    setActiveTab("catalogue");
                   }}
-                  className="rounded-xl border border-neutral-200 bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
+                  className="rounded-xl border border-[#333] bg-[#141414] px-4 py-2.5 text-xs font-semibold text-neutral-200 hover:bg-[#1a1a1a] transition cursor-pointer"
                 >
-                  Sync Categories
+                  Select All Candidate Products
                 </button>
+
                 <button
                   type="button"
-                  onClick={handlePushSelected}
-                  className="rounded-xl border border-neutral-200 bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
+                  onClick={runDiagnostics}
+                  className="rounded-xl border border-[#333] bg-[#141414] px-4 py-2.5 text-xs font-semibold text-neutral-200 hover:bg-[#1a1a1a] transition cursor-pointer"
                 >
-                  Sync Variants
+                  Run Diagnostics Probe
                 </button>
+
                 <button
                   type="button"
-                  onClick={handlePushSelected}
-                  className="rounded-xl border border-neutral-200 bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
+                  onClick={handleSyncTrackingAll}
+                  className="rounded-xl border border-[#333] bg-[#141414] px-4 py-2.5 text-xs font-semibold text-neutral-200 hover:bg-[#1a1a1a] transition cursor-pointer"
                 >
-                  Sync Images
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    startTransition(async () => {
-                      await fetch("/api/admin/qikink/products", {
-                        method: "POST",
-                        headers: getHeaders(),
-                        body: JSON.stringify({ action: "retry_failed_sync" }),
-                      });
-                      setStatusMessage({ text: "Retry sync triggered for all catalog items.", type: "success" });
-                      await loadData();
-                    });
-                  }}
-                  className="rounded-xl border border-neutral-200 bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-200 transition"
-                >
-                  Retry Failed Sync
+                  Sync Order Tracking
                 </button>
               </div>
-
-              <div className="w-full sm:w-64">
-                <input
-                  type="text"
-                  placeholder="Search products or SKUs..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-300 bg-neutral-50 px-3.5 py-2 text-xs text-neutral-900 outline-none focus:border-black focus:bg-white transition"
-                />
-              </div>
-            </div>
-
-            {/* Price Protection Information Banner */}
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 text-xs text-amber-900 flex items-start gap-3">
-              <span className="text-base">🛡️</span>
-              <div>
-                <strong>Price Protection Active:</strong> TrendEra customer selling price is strictly preserved when updating from Qikink. Qikink base production cost (e.g. ₹633.20) will never overwrite your retail selling price (e.g. ₹1,499.00). Each product variant maintains its unique verified Qikink manufacturing SKU.
-              </div>
-            </div>
-
-            {/* Products Table (Section B) */}
-            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-neutral-200 px-6 py-4 bg-neutral-50">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedProductNames.size === presetTemplates.length && presetTemplates.length > 0}
-                    onChange={toggleSelectAll}
-                    className="h-4 w-4 rounded border-neutral-300 text-black focus:ring-black"
-                  />
-                  <span className="text-xs font-semibold text-neutral-700">Select All Products</span>
-                </div>
-                <span className="text-xs text-neutral-500">
-                  Showing {filteredPresets.length} available product template(s)
-                </span>
-              </div>
-
-              <div className="divide-y divide-neutral-200">
-                {filteredPresets.map((product) => {
-                  const isSelected = selectedProductNames.has(product.name);
-                  const isAlreadyInDb = dbProducts.some(
-                    (p) => p.name.toLowerCase() === product.name.toLowerCase() || p.slug === product.slug,
-                  );
-
-                  return (
-                    <article key={product.name} className="p-6 transition hover:bg-neutral-50/50">
-                      <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                        <div className="flex items-start gap-4">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelectProduct(product.name)}
-                            className="mt-1 h-4 w-4 rounded border-neutral-300 text-black focus:ring-black"
-                          />
-                          {product.image_url && (
-                            <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-xl bg-neutral-100 border border-neutral-200">
-                              <Image
-                                src={product.image_url}
-                                alt={product.name}
-                                fill
-                                sizes="80px"
-                                className="object-cover"
-                              />
-                            </div>
-                          )}
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-base font-bold text-neutral-900">{product.name}</h3>
-                              {isAlreadyInDb ? (
-                                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800">
-                                  Published on Store
-                                </span>
-                              ) : (
-                                <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-[10px] font-semibold text-neutral-600">
-                                  Ready to Push
-                                </span>
-                              )}
-                              <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-[10px] text-neutral-600 font-mono">
-                                {product.category || "Apparel"}
-                              </span>
-                            </div>
-                            <p className="text-xs text-neutral-600 max-w-xl">{product.description}</p>
-                            <p className="text-[11px] text-neutral-400 font-mono">
-                              Qikink Base ID: {product.qikink_product_id || "Standard"} · Variants: {product.variants.length}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 self-start md:self-center">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewProduct(product)}
-                            className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50 transition"
-                          >
-                            Preview Product
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              startTransition(async () => {
-                                setStatusMessage({ text: `Pushing '${product.name}' to TrendEra...`, type: "info" });
-                                try {
-                                  const res = await fetch("/api/admin/qikink/products", {
-                                    method: "POST",
-                                    headers: getHeaders(),
-                                    body: JSON.stringify({ action: "push_to_trendera", product, status: "published" }),
-                                  });
-                                  const data = await res.json();
-                                  if (data.success) {
-                                    setStatusMessage({ text: `Published '${product.name}' to live store!`, type: "success" });
-                                    await loadData();
-                                  } else {
-                                    setStatusMessage({ text: `Failed: ${data.error}`, type: "error" });
-                                  }
-                                } catch (err) {
-                                  setStatusMessage({ text: `Error: ${err instanceof Error ? err.message : "Failed"}`, type: "error" });
-                                }
-                              });
-                            }}
-                            disabled={isPending}
-                            className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 transition disabled:opacity-50"
-                          >
-                            Push to TrendEra
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Variant Matrix Table */}
-                      <div className="mt-4 overflow-x-auto rounded-xl border border-neutral-100 bg-neutral-50/60 p-3">
-                        <table className="w-full text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-neutral-200 text-neutral-400 uppercase tracking-wider text-[10px]">
-                              <th className="py-2 px-3">Variant Label</th>
-                              <th className="py-2 px-3">Size</th>
-                              <th className="py-2 px-3">Colour</th>
-                              <th className="py-2 px-3">TrendEra SKU</th>
-                              <th className="py-2 px-3">Qikink Manufacturing SKU</th>
-                              <th className="py-2 px-3">Qikink Cost</th>
-                              <th className="py-2 px-3">TrendEra Selling Price</th>
-                              <th className="py-2 px-3">Gross Margin</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-neutral-200/50">
-                            {product.variants.map((variant) => {
-                              const margin = variant.selling_price - variant.cost_price;
-                              const marginPct = ((margin / variant.selling_price) * 100).toFixed(0);
-
-                              return (
-                                <tr key={variant.sku} className="hover:bg-white/80">
-                                  <td className="py-2 px-3 font-medium text-neutral-900">{variant.label}</td>
-                                  <td className="py-2 px-3 text-neutral-600">{variant.size || "—"}</td>
-                                  <td className="py-2 px-3 text-neutral-600">{variant.colour || "—"}</td>
-                                  <td className="py-2 px-3 font-mono text-neutral-500">{variant.sku}</td>
-                                  <td className="py-2 px-3 font-mono font-semibold text-neutral-900">{variant.qikink_sku}</td>
-                                  <td className="py-2 px-3 text-neutral-500">₹{variant.cost_price.toFixed(2)}</td>
-                                  <td className="py-2 px-3 font-bold text-neutral-900">₹{variant.selling_price.toFixed(2)}</td>
-                                  <td className="py-2 px-3 font-semibold text-emerald-600">
-                                    +₹{margin.toFixed(2)} ({marginPct}%)
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Currently Published In Database */}
-            <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-              <h3 className="text-base font-semibold text-neutral-900">
-                Authoritative TrendEra Database Catalogue ({dbProducts.length} Products)
-              </h3>
-              <p className="mt-1 text-xs text-neutral-500">
-                Products currently active in PostgreSQL / Supabase, powering TrendEra&apos;s live storefront.
-              </p>
-
-              {dbProducts.length === 0 ? (
-                <div className="mt-6 rounded-xl border border-dashed border-neutral-300 p-8 text-center">
-                  <p className="text-sm font-medium text-neutral-600">No products published in database yet.</p>
-                  <p className="mt-1 text-xs text-neutral-400">
-                    Click &apos;Push to TrendEra&apos; above or &apos;Import Presets&apos; to publish the verified Qikink products.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleImportPresets}
-                    className="mt-4 inline-flex items-center rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800"
-                  >
-                    Import &amp; Publish Presets Now
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {dbProducts.map((p) => (
-                    <div key={p.id} className="rounded-xl border border-neutral-200 p-4 bg-neutral-50">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-neutral-900">{p.name}</span>
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
-                          {p.status}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-neutral-500 line-clamp-2">{p.description}</p>
-                      <div className="mt-3 flex items-center justify-between border-t border-neutral-200/60 pt-2 text-xs">
-                        <span className="text-neutral-500">{p.product_variants?.length || 0} variants active</span>
-                        <strong className="text-neutral-900">₹{Number(p.price).toFixed(2)}</strong>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         )}
 
-        {/* TAB 2: ORDER FULFILLMENT & TRACKING */}
-        {activeTab === "orders" && (
+        {/* TAB 2: QIKINK CONNECTION */}
+        {activeTab === "connection" && (
           <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div>
-                <h3 className="text-base font-semibold text-neutral-900">Order Fulfillment &amp; Tracking Center</h3>
-                <p className="text-xs text-neutral-500">
-                  Cashfree payment verification → Automated Qikink fulfillment submission → Live status &amp; AWB tracking
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">Qikink API Connection</h2>
+                  <p className="text-xs text-neutral-400 mt-1">Direct token exchange with Qikink Custom Open API</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={isPending}
+                  className="rounded-xl bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
+                >
+                  Probe Connection
+                </button>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3 pt-2">
+                <div className="rounded-xl border border-[#1f1f1f] bg-[#121212] p-4">
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Mode</span>
+                  <div className="text-sm font-bold text-white mt-1">
+                    {connection ? connection.mode.toUpperCase() : "LIVE"}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#1f1f1f] bg-[#121212] p-4">
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Status</span>
+                  <div className="text-sm font-bold mt-1">
+                    {connection ? (
+                      connection.authenticated ? (
+                        <span className="text-emerald-400">Authenticated (HTTP 200)</span>
+                      ) : (
+                        <span className="text-rose-400">Failed</span>
+                      )
+                    ) : (
+                      <span className="text-neutral-400">Not probed yet</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[#1f1f1f] bg-[#121212] p-4">
+                  <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Latency</span>
+                  <div className="text-sm font-bold text-white mt-1">
+                    {connection?.latencyMs ? `${connection.latencyMs} ms` : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[#1f1f1f] bg-[#121212] p-4 text-xs space-y-2">
+                <div className="flex justify-between text-neutral-400">
+                  <span>Live Base URL:</span>
+                  <span className="font-mono text-neutral-300">https://api.qikink.com</span>
+                </div>
+                <div className="flex justify-between text-neutral-400">
+                  <span>Sandbox Base URL:</span>
+                  <span className="font-mono text-neutral-300">https://sandbox.qikink.com</span>
+                </div>
+                <div className="flex justify-between text-neutral-400">
+                  <span>Live Order Submission Safety Lock:</span>
+                  <span className="font-mono text-amber-400">QIKINK_LIVE_ORDERS_ENABLED=false (Locked)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: PRODUCT IMPORT */}
+        {activeTab === "import" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Import Products from CSV</h2>
+              <p className="text-xs text-neutral-400">
+                Paste CSV data conforming to the Qikink product catalogue schema. Every purchasable variant must include an exact manufacturing Qikink SKU.
+              </p>
+
+              <div className="rounded-xl border border-[#222] bg-[#121212] p-3 text-[11px] text-neutral-400 space-y-1">
+                <strong>Expected CSV Headers:</strong>
+                <p className="font-mono text-neutral-300">
+                  Product Name, Description, Category, Image URL, Variant Label, Size, Colour, SKU, Qikink SKU, Cost Price, Selling Price, Compare At Price, Mockup Link
                 </p>
               </div>
+
+              <textarea
+                rows={8}
+                placeholder="Product Name,Category,Cost Price,Selling Price,SKU,Qikink SKU,Variant Label&#10;Unisex Terry Oversized Tee,Cotton Apparels,633.20,1499.00,TR-OTEE-BLK-XS,64974906-BLK-XS,Black / XS"
+                value={csvInput}
+                onChange={(e) => setCsvInput(e.target.value)}
+                className="w-full rounded-xl border border-[#292929] bg-[#121212] p-4 text-xs font-mono text-white placeholder-neutral-600 focus:border-white focus:outline-none"
+              />
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleParseCsv}
+                  disabled={isPending || !csvInput.trim()}
+                  className="rounded-xl bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
+                >
+                  Parse &amp; Validate CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: PRODUCT CATALOGUE */}
+        {activeTab === "catalogue" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Filter products..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="rounded-xl border border-[#292929] bg-[#121212] px-4 py-2 text-xs text-white placeholder-neutral-500 focus:border-white focus:outline-none w-64"
+                />
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="rounded-xl border border-[#333] bg-[#141414] px-3 py-2 text-xs text-neutral-300 hover:bg-[#1a1a1a] transition cursor-pointer"
+                >
+                  {selectedProductNames.size === presetTemplates.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={handleSyncTrackingAll}
-                disabled={isPending}
-                className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-neutral-800 transition disabled:opacity-50"
+                onClick={handlePushSelected}
+                disabled={isPending || selectedProductNames.size === 0}
+                className="rounded-xl bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
               >
-                {isPending ? "Syncing..." : "Sync Tracking from Qikink"}
+                Publish Selected to Store ({selectedProductNames.size})
               </button>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredPresets.map((product) => {
+                const isSelected = selectedProductNames.has(product.name);
+                const dbMatch = dbProducts.find((p) => p.slug === product.slug || p.name === product.name);
+                const minPrice = Math.min(...product.variants.map((v) => Number(v.selling_price)));
+
+                return (
+                  <div
+                    key={product.name}
+                    className={`rounded-2xl border p-5 transition-all flex flex-col justify-between ${
+                      isSelected
+                        ? "border-emerald-500/80 bg-[#0f1411]"
+                        : "border-[#202020] bg-[#0d0d0d] hover:border-[#333]"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectProduct(product.name)}
+                            className="h-4 w-4 rounded accent-emerald-500 cursor-pointer"
+                          />
+                          <span className="text-xs uppercase tracking-wider font-semibold text-neutral-400">
+                            {product.category || "Apparel"}
+                          </span>
+                        </label>
+                        {dbMatch ? (
+                          <span className="rounded-full bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                            Live on Store
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-neutral-900 border border-[#2c2c2c] px-2 py-0.5 text-[10px] font-semibold text-neutral-400">
+                            Ready to Publish
+                          </span>
+                        )}
+                      </div>
+
+                      {product.image_url && (
+                        <div className="relative mb-4 aspect-square w-full overflow-hidden rounded-xl bg-[#161616] border border-[#222]">
+                          <Image
+                            src={product.image_url}
+                            alt={product.name}
+                            fill
+                            sizes="(max-width: 640px) 100vw, 33vw"
+                            className="object-cover"
+                          />
+                        </div>
+                      )}
+
+                      <h3 className="text-base font-bold text-white">{product.name}</h3>
+                      <p className="mt-1 text-xs text-neutral-400 line-clamp-2">{product.description}</p>
+
+                      <div className="mt-4 flex items-center justify-between text-xs">
+                        <span className="text-neutral-500">Retail Price:</span>
+                        <strong className="text-white text-sm">₹{minPrice.toFixed(2)}</strong>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-xs">
+                        <span className="text-neutral-500">Variants:</span>
+                        <span className="text-neutral-300 font-semibold">{product.variants.length} verified SKUs</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 border-t border-[#202020] pt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handlePushSingle(product)}
+                        disabled={isPending}
+                        className="w-full rounded-xl bg-white py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
+                      >
+                        Push to TrendEra
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: VARIANTS AND SKUS */}
+        {activeTab === "variants" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Variant &amp; SKU Inspection</h2>
+              <p className="text-xs text-neutral-400">
+                Audited manufacturing Qikink SKUs, fulfillment cost prices, retail prices, and profit margins.
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-[#222] text-neutral-400">
+                      <th className="py-3 px-3">Product</th>
+                      <th className="py-3 px-3">Variant Label</th>
+                      <th className="py-3 px-3">TrendEra SKU</th>
+                      <th className="py-3 px-3">Qikink SKU</th>
+                      <th className="py-3 px-3">Cost</th>
+                      <th className="py-3 px-3">Retail</th>
+                      <th className="py-3 px-3">Margin</th>
+                      <th className="py-3 px-3">Print Size</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#1a1a1a]">
+                    {presetTemplates.flatMap((p) =>
+                      p.variants.map((v) => {
+                        const margin = Number(v.selling_price) - Number(v.cost_price);
+                        const marginPercent = Math.round((margin / Number(v.selling_price)) * 100);
+                        return (
+                          <tr key={v.sku} className="hover:bg-[#121212]">
+                            <td className="py-3 px-3 font-semibold text-white">{p.name}</td>
+                            <td className="py-3 px-3 text-neutral-300">{v.label}</td>
+                            <td className="py-3 px-3 font-mono text-neutral-400">{v.sku}</td>
+                            <td className="py-3 px-3 font-mono text-emerald-400">{v.qikink_sku}</td>
+                            <td className="py-3 px-3 text-neutral-400">₹{Number(v.cost_price).toFixed(2)}</td>
+                            <td className="py-3 px-3 font-bold text-white">₹{Number(v.selling_price).toFixed(2)}</td>
+                            <td className="py-3 px-3 text-emerald-400 font-semibold">{marginPercent}%</td>
+                            <td className="py-3 px-3 text-neutral-400">
+                              {v.width_inches && v.height_inches ? `${v.width_inches}" × ${v.height_inches}"` : "Standard"}
+                            </td>
+                          </tr>
+                        );
+                      }),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: CATEGORIES */}
+        {activeTab === "categories" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Category Taxonomy</h2>
+              <p className="text-xs text-neutral-400">
+                Products grouped by collection categories for the customer storefront navigation.
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {Array.from(new Set(presetTemplates.map((p) => p.category || "Apparel"))).map((cat) => {
+                  const count = presetTemplates.filter((p) => (p.category || "Apparel") === cat).length;
+                  return (
+                    <div key={cat} className="rounded-xl border border-[#222] bg-[#121212] p-4">
+                      <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold">Category</span>
+                      <div className="text-sm font-bold text-white mt-1">{cat}</div>
+                      <p className="text-xs text-neutral-400 mt-1">{count} product(s) assigned</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 7: ORDER FULFILLMENT */}
+        {activeTab === "fulfillment" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">Customer Store Orders</h2>
+                  <p className="text-xs text-neutral-400">Verified Cashfree payments &amp; automated Qikink submission</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadData}
+                  className="rounded-xl border border-[#333] bg-[#141414] px-3.5 py-1.5 text-xs text-neutral-200 hover:bg-[#1a1a1a] transition cursor-pointer"
+                >
+                  Refresh Orders
+                </button>
+              </div>
+
               {orders.length === 0 ? (
-                <div className="p-12 text-center text-sm text-neutral-500">
-                  No orders recorded in store database yet. When customers check out on TrendEra, their orders appear here with live Cashfree &amp; Qikink status.
+                <div className="text-center py-12 text-neutral-500 text-xs">
+                  No customer orders recorded yet. Orders created via /checkout will appear here.
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="py-3 px-4">Order Number</th>
-                        <th className="py-3 px-4">Customer</th>
-                        <th className="py-3 px-4">Total Amount</th>
-                        <th className="py-3 px-4">Cashfree Payment</th>
-                        <th className="py-3 px-4">Qikink Fulfilment</th>
-                        <th className="py-3 px-4">Qikink Order ID</th>
-                        <th className="py-3 px-4">Live Status / AWB</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
+                    <thead>
+                      <tr className="border-b border-[#222] text-neutral-400">
+                        <th className="py-3 px-3">Order #</th>
+                        <th className="py-3 px-3">Customer</th>
+                        <th className="py-3 px-3">Total</th>
+                        <th className="py-3 px-3">Payment</th>
+                        <th className="py-3 px-3">Qikink ID</th>
+                        <th className="py-3 px-3">Submission</th>
+                        <th className="py-3 px-3">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-neutral-200">
+                    <tbody className="divide-y divide-[#1a1a1a]">
                       {orders.map((o) => (
-                        <tr key={o.id} className="hover:bg-neutral-50">
-                          <td className="py-3 px-4 font-mono font-bold text-neutral-900">{o.order_number}</td>
-                          <td className="py-3 px-4">
-                            <div className="font-medium text-neutral-900">{o.customer_name}</div>
-                            <div className="text-[11px] text-neutral-400">{o.customer_phone}</div>
+                        <tr key={o.id} className="hover:bg-[#121212]">
+                          <td className="py-3 px-3 font-mono font-semibold text-white">{o.order_number}</td>
+                          <td className="py-3 px-3 text-neutral-300">
+                            <div>{o.customer_name}</div>
+                            <div className="text-[10px] text-neutral-500">{o.customer_phone}</div>
                           </td>
-                          <td className="py-3 px-4 font-semibold text-neutral-900">
-                            ₹{Number(o.total_amount).toFixed(2)}
-                          </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-3 font-bold text-white">₹{Number(o.total_amount).toFixed(2)}</td>
+                          <td className="py-3 px-3">
                             <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                                 o.payment_status === "paid"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : o.payment_method === "cod"
-                                    ? "bg-blue-100 text-blue-800"
-                                    : "bg-amber-100 text-amber-800"
+                                  ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
+                                  : "bg-amber-950/60 text-amber-400 border border-amber-800/60"
                               }`}
                             >
-                              {o.payment_method === "cod" ? "COD Due" : o.payment_status.toUpperCase()}
+                              {o.payment_method.toUpperCase()} ({o.payment_status})
                             </span>
                           </td>
-                          <td className="py-3 px-4">
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                o.qikink_submission_status === "submitted"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : o.qikink_submission_status === "failed"
-                                    ? "bg-rose-100 text-rose-800"
-                                    : "bg-neutral-100 text-neutral-800"
-                              }`}
+                          <td className="py-3 px-3 font-mono text-neutral-400">{o.qikink_order_id || "—"}</td>
+                          <td className="py-3 px-3 text-neutral-400">{o.qikink_submission_status}</td>
+                          <td className="py-3 px-3">
+                            <button
+                              type="button"
+                              onClick={() => handleSyncSingleOrder(o.id)}
+                              className="text-xs text-neutral-300 underline hover:text-white cursor-pointer"
                             >
-                              {o.qikink_submission_status.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-mono text-neutral-600">{o.qikink_order_id || "—"}</td>
-                          <td className="py-3 px-4">
-                            {o.qikink_status ? (
-                              <div>
-                                <span className="font-semibold text-neutral-900">{o.qikink_status}</span>
-                                {o.qikink_awb && (
-                                  <div className="text-[10px] text-neutral-500">
-                                    AWB: {o.qikink_awb} ({o.qikink_courier || "Courier"})
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-neutral-400">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4 text-right space-x-2">
-                            {o.qikink_submission_status === "submitted" ? (
-                              <button
-                                type="button"
-                                onClick={() => handleSyncSingleOrder(o.id)}
-                                className="rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50"
-                              >
-                                Sync Status
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRetryFulfilment(o.id)}
-                                className="rounded-lg bg-black px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-neutral-800"
-                              >
-                                Submit to Qikink
-                              </button>
-                            )}
+                              Sync Tracking
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -954,199 +1068,212 @@ export default function QikinkAdminPage() {
           </div>
         )}
 
-        {/* TAB 3: API CAPABILITIES MATRIX & AUDIT LOG */}
-        {activeTab === "capabilities" && (
+        {/* TAB 8: TRACKING */}
+        {activeTab === "tracking" && (
           <div className="space-y-6">
-            <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-              <h3 className="text-base font-semibold text-neutral-900">
-                Official Qikink Open API Live Capability Matrix
-              </h3>
-              <p className="mt-1 text-xs text-neutral-500">
-                Verified live against Qikink Open API (`https://api.qikink.com`). Reflects true endpoint support without unsupported assumptions.
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">Fulfillment Tracking</h2>
+                  <p className="text-xs text-neutral-400">Live shipping status, AWB numbers, and courier tracking links</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncTrackingAll}
+                  disabled={isPending}
+                  className="rounded-xl bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
+                >
+                  Sync All Active Orders
+                </button>
+              </div>
+
+              {orders.filter((o) => o.qikink_awb || o.qikink_status).length === 0 ? (
+                <div className="text-center py-12 text-neutral-500 text-xs">
+                  No active tracking details yet. Once orders are submitted and printed, AWB numbers will appear here.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#222] text-neutral-400">
+                        <th className="py-3 px-3">Order #</th>
+                        <th className="py-3 px-3">Courier</th>
+                        <th className="py-3 px-3">AWB</th>
+                        <th className="py-3 px-3">Qikink Status</th>
+                        <th className="py-3 px-3">Tracking</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1a1a1a]">
+                      {orders
+                        .filter((o) => o.qikink_awb || o.qikink_status)
+                        .map((o) => (
+                          <tr key={o.id} className="hover:bg-[#121212]">
+                            <td className="py-3 px-3 font-mono font-semibold text-white">{o.order_number}</td>
+                            <td className="py-3 px-3 text-neutral-300">{o.qikink_courier || "Standard"}</td>
+                            <td className="py-3 px-3 font-mono text-emerald-400">{o.qikink_awb || "—"}</td>
+                            <td className="py-3 px-3 text-neutral-300">{o.qikink_status || "Processing"}</td>
+                            <td className="py-3 px-3">
+                              {o.qikink_tracking_url ? (
+                                <Link
+                                  href={o.qikink_tracking_url}
+                                  target="_blank"
+                                  className="text-emerald-400 underline hover:text-emerald-300"
+                                >
+                                  Track Package ↗
+                                </Link>
+                              ) : (
+                                <span className="text-neutral-500">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 9: SYNC HISTORY */}
+        {activeTab === "history" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Synchronization Audit Trail</h2>
+              <p className="text-xs text-neutral-400">
+                Authoritative history of product publications and tracking updates logged to qikink_sync_logs.
               </p>
 
-              <div className="mt-6 overflow-hidden rounded-xl border border-neutral-200">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="py-3 px-4">Capability</th>
-                      <th className="py-3 px-4">Open API Status</th>
-                      <th className="py-3 px-4">Verified Endpoint</th>
-                      <th className="py-3 px-4">TrendEra Architecture &amp; Implementation</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-200">
-                    <tr>
-                      <td className="py-3 px-4 font-semibold text-neutral-900">Authentication</td>
-                      <td className="py-3 px-4 text-emerald-600 font-semibold">✓ Supported (Live 200)</td>
-                      <td className="py-3 px-4 font-mono text-neutral-600">POST /api/token</td>
-                      <td className="py-3 px-4 text-neutral-600">
-                        Token generation using ClientId + client_secret form URL-encoded. Automatic 1-hour caching and transparent 401 refresh.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-3 px-4 font-semibold text-neutral-900">Create Fulfillment Order</td>
-                      <td className="py-3 px-4 text-emerald-600 font-semibold">✓ Supported (Contract verified)</td>
-                      <td className="py-3 px-4 font-mono text-neutral-600">POST /api/order/create</td>
-                      <td className="py-3 px-4 text-neutral-600">
-                        Submitted automatically after Cashfree payment verification or COD confirmation with idempotency claim lock.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-3 px-4 font-semibold text-neutral-900">Order Tracking &amp; Status Lookup</td>
-                      <td className="py-3 px-4 text-emerald-600 font-semibold">✓ Supported (Live 200)</td>
-                      <td className="py-3 px-4 font-mono text-neutral-600">GET /api/order/list</td>
-                      <td className="py-3 px-4 text-neutral-600">
-                        Pull lookup querying order_reference_no or id. Synchronizes AWB, courier name, tracking link, and live production status.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-3 px-4 font-semibold text-neutral-900">My Products Catalogue API</td>
-                      <td className="py-3 px-4 text-rose-600 font-semibold">✗ Not in Open API (404)</td>
-                      <td className="py-3 px-4 text-neutral-400">None (Dashboard plugin only)</td>
-                      <td className="py-3 px-4 text-neutral-600">
-                        Native Push to TrendEra workflow with verified presets &amp; CSV importer. No WooCommerce/WordPress dependency.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-3 px-4 font-semibold text-neutral-900">Webhooks for Product Changes</td>
-                      <td className="py-3 px-4 text-rose-600 font-semibold">✗ Not in Open API (404)</td>
-                      <td className="py-3 px-4 text-neutral-400">None</td>
-                      <td className="py-3 px-4 text-neutral-600">
-                        Admin-triggered manual refresh and CSV sync. TrendEra selling prices and content are fully protected.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              {syncLogs.length === 0 ? (
+                <div className="text-center py-12 text-neutral-500 text-xs">
+                  No synchronization entries logged yet. Publications and tracking syncs will be recorded here.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#222] text-neutral-400">
+                        <th className="py-3 px-3">Timestamp</th>
+                        <th className="py-3 px-3">Operation</th>
+                        <th className="py-3 px-3">Status</th>
+                        <th className="py-3 px-3">Items</th>
+                        <th className="py-3 px-3">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1a1a1a]">
+                      {syncLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-[#121212]">
+                          <td className="py-3 px-3 text-neutral-400">
+                            {new Date(log.created_at).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-3 font-semibold uppercase text-white">{log.sync_type}</td>
+                          <td className="py-3 px-3">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                log.status === "success"
+                                  ? "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60"
+                                  : "bg-rose-950/60 text-rose-400 border border-rose-800/60"
+                              }`}
+                            >
+                              {log.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-neutral-300">{log.items_count}</td>
+                          <td className="py-3 px-3 font-mono text-[11px] text-neutral-400 max-w-xs truncate">
+                            {JSON.stringify(log.details)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 10: DIAGNOSTICS */}
+        {activeTab === "diagnostics" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">System Diagnostics Panel</h2>
+                  <p className="text-xs text-neutral-400">
+                    Live probe of all 11 architecture components (Supabase, Qikink Open API, Commerce engine)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={runDiagnostics}
+                  disabled={isPending}
+                  className="rounded-xl bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition cursor-pointer disabled:opacity-50"
+                >
+                  Run Full Probe
+                </button>
+              </div>
+
+              {!diagnostics ? (
+                <div className="text-center py-12 text-neutral-500 text-xs">
+                  Click &quot;Run Full Probe&quot; to test Supabase, Qikink, and commerce subsystems.
+                </div>
+              ) : (
+                <div className="space-y-3 pt-2">
+                  {Object.entries(diagnostics.checks).map(([key, item]) => (
+                    <div
+                      key={key}
+                      className={`rounded-xl border p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        item.healthy
+                          ? "border-emerald-900/60 bg-emerald-950/20"
+                          : "border-rose-900/60 bg-rose-950/20"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <strong className="text-white font-semibold">{item.name}</strong>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                              item.healthy
+                                ? "bg-emerald-900/80 text-emerald-300"
+                                : "bg-rose-900/80 text-rose-300"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                          {item.latencyMs !== undefined && (
+                            <span className="text-[10px] text-neutral-500">({item.latencyMs}ms)</span>
+                          )}
+                        </div>
+                        <p className={item.healthy ? "text-emerald-300/80" : "text-rose-300/80"}>
+                          {item.message}
+                        </p>
+                        {item.remediation && (
+                          <p className="text-[11px] text-amber-300/90 font-mono mt-1">
+                            Action: {item.remediation}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* SQL Migration Reference Box */}
+            <div className="rounded-2xl border border-[#202020] bg-[#0d0d0d] p-6 space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                Supabase Migration File
+              </h3>
+              <p className="text-xs text-neutral-400">
+                If the diagnostic indicates pending migrations or missing columns, run the consolidated script in your Supabase SQL Editor:
+              </p>
+              <div className="rounded-xl border border-[#222] bg-[#121212] p-3 text-xs font-mono text-emerald-400">
+                supabase/migrations/0005_consolidated_repair_and_rls.sql
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* Product Preview Modal */}
-      {previewProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-neutral-200 pb-4">
-              <div>
-                <h3 className="text-lg font-bold text-neutral-900">{previewProduct.name}</h3>
-                <span className="text-xs text-neutral-500">Category: {previewProduct.category || "Apparel"}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPreviewProduct(null)}
-                className="rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <p className="text-xs text-neutral-600">{previewProduct.description}</p>
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
-                <span className="text-[11px] font-semibold uppercase text-neutral-500">
-                  {previewProduct.variants.length} Variants Configured
-                </span>
-                <div className="mt-2 divide-y divide-neutral-200 text-xs">
-                  {previewProduct.variants.map((v: QikinkProductImportVariant) => (
-                    <div key={v.sku} className="py-2 flex items-center justify-between">
-                      <div>
-                        <span className="font-medium text-neutral-900">{v.label}</span>
-                        <div className="text-[11px] text-neutral-500 font-mono">
-                          Qikink SKU: {v.qikink_sku} · TrendEra SKU: {v.sku}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-neutral-900">₹{v.selling_price.toFixed(2)}</div>
-                        <div className="text-[11px] text-neutral-400">Cost: ₹{v.cost_price.toFixed(2)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
-              <button
-                type="button"
-                onClick={() => setPreviewProduct(null)}
-                className="rounded-xl border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
-              >
-                Close Preview
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  startTransition(async () => {
-                    await fetch("/api/admin/qikink/products", {
-                      method: "POST",
-                      headers: getHeaders(),
-                      body: JSON.stringify({ action: "push_to_trendera", product: previewProduct, status: "published" }),
-                    });
-                    setStatusMessage({ text: `Published '${previewProduct.name}'!`, type: "success" });
-                    setPreviewProduct(null);
-                    await loadData();
-                  });
-                }}
-                className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800"
-              >
-                Push to TrendEra
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CSV Import Modal */}
-      {showCsvModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-neutral-200 pb-3">
-              <h3 className="text-base font-bold text-neutral-900">Import Products from CSV</h3>
-              <button
-                type="button"
-                onClick={() => setShowCsvModal(false)}
-                className="rounded-full p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <p className="text-xs text-neutral-500">
-                Paste CSV data. Required headers: <code>Product Name, Variant Label, Size, Colour, SKU, Qikink SKU, Cost Price, Selling Price</code>
-              </p>
-              <textarea
-                rows={8}
-                value={csvInput}
-                onChange={(e) => setCsvInput(e.target.value)}
-                placeholder={`Product Name,Variant Label,Size,Colour,SKU,Qikink SKU,Cost Price,Selling Price\nUnisex Terry Oversized Tee,Black / S,S,Black,TR-OTEE-BLK-S,TEE-OVR-BLK-S,633.20,1499.00`}
-                className="w-full rounded-xl border border-neutral-300 bg-neutral-50 p-3 font-mono text-xs outline-none focus:border-black focus:bg-white"
-              />
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3 border-t border-neutral-200 pt-4">
-              <button
-                type="button"
-                onClick={() => setShowCsvModal(false)}
-                className="rounded-xl border border-neutral-300 px-4 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleImportCsv}
-                disabled={isPending || !csvInput.trim()}
-                className="rounded-xl bg-black px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
-              >
-                Parse and Load
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
-

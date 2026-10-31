@@ -135,6 +135,8 @@ export type QikinkProductImportVariant = {
   mockup_link?: string;
   design_code?: string;
   design_link?: string;
+  width_inches?: string;
+  height_inches?: string;
   placement_sku?: string;
   print_type_id?: number;
 };
@@ -170,4 +172,3 @@ export type QikinkTrackingSyncResult = {
   synced: boolean;
   error?: string;
 };
-

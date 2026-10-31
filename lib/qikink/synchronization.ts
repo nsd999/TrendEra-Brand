@@ -1,29 +1,37 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
+import { getAdminClient } from "../supabase/admin.ts";
 import { validateProductImportItem, slugify } from "./products.ts";
 import type { QikinkProductImportItem, QikinkSyncResult } from "./types.ts";
-
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
 
 export type PushProductOptions = {
   preserveExistingPrices?: boolean;
   status?: "draft" | "published" | "archived";
 };
 
+export type VerifiedProductPublication = {
+  productId: string;
+  name: string;
+  slug: string;
+  status: string;
+  category: string;
+  imageUrl?: string;
+  price: number;
+  variantsCount: number;
+  validSkusCount: number;
+  created: boolean;
+  verifiedAt: string;
+};
+
 /**
  * Pushes a single Qikink product and its variants into TrendEra's authoritative Supabase database.
  * Completely idempotent: updates if existing, creates if new.
+ * Performs an independent post-write database read verification before declaring success.
  */
 export async function pushProductToTrendEra(
   item: QikinkProductImportItem,
   options: PushProductOptions = { preserveExistingPrices: true, status: "published" },
-): Promise<{ productId: string; created: boolean; variantsCount: number }> {
+): Promise<VerifiedProductPublication> {
   validateProductImportItem(item);
   const supabase = getAdminClient();
 
@@ -101,55 +109,109 @@ export async function pushProductToTrendEra(
     productId = inserted.id;
   }
 
-  // Process variants
-  let variantsSynced = 0;
-  for (const v of item.variants) {
-    const { data: existingVariant } = await supabase
-      .from("product_variants")
-      .select("id,price")
-      .eq("sku", v.sku)
-      .maybeSingle();
-
-    const finalSellingPrice =
-      options.preserveExistingPrices && existingVariant
-        ? Number(existingVariant.price)
-        : Number(v.selling_price);
-
-    const variantData = {
-      product_id: productId,
-      label: v.label,
-      size: v.size ?? null,
-      colour: v.colour ?? null,
-      sku: v.sku,
-      qikink_sku: v.qikink_sku,
-      price: finalSellingPrice,
-      cost_price: Number(v.cost_price),
-      compare_at_price: v.compare_at_price ?? null,
-      mockup_link: v.mockup_link ?? item.image_url ?? null,
-      design_code: v.design_code ?? null,
-      design_link: v.design_link ?? null,
-      placement_sku: v.placement_sku ?? null,
-      print_type_id: v.print_type_id ?? 1,
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (existingVariant) {
-      const { error: vUpdateErr } = await supabase
+  // Process variants with rollback protection for new products
+  try {
+    for (const v of item.variants) {
+      const { data: existingVariant } = await supabase
         .from("product_variants")
-        .update(variantData)
-        .eq("id", existingVariant.id);
-      if (vUpdateErr) throw new Error(`Failed to update variant '${v.sku}': ${vUpdateErr.message}`);
-    } else {
-      const { error: vInsertErr } = await supabase
-        .from("product_variants")
-        .insert(variantData);
-      if (vInsertErr) throw new Error(`Failed to insert variant '${v.sku}': ${vInsertErr.message}`);
+        .select("id,price")
+        .eq("sku", v.sku)
+        .maybeSingle();
+
+      const finalSellingPrice =
+        options.preserveExistingPrices && existingVariant
+          ? Number(existingVariant.price)
+          : Number(v.selling_price);
+
+      const variantData = {
+        product_id: productId,
+        label: v.label,
+        size: v.size ?? null,
+        colour: v.colour ?? null,
+        sku: v.sku,
+        qikink_sku: v.qikink_sku,
+        price: finalSellingPrice,
+        cost_price: Number(v.cost_price),
+        compare_at_price: v.compare_at_price ?? null,
+        mockup_link: v.mockup_link ?? item.image_url ?? null,
+        design_code: v.design_code ?? null,
+        design_link: v.design_link ?? null,
+        width_inches: v.width_inches ? Number(v.width_inches) : null,
+        height_inches: v.height_inches ? Number(v.height_inches) : null,
+        placement_sku: v.placement_sku ?? null,
+        print_type_id: v.print_type_id ?? 1,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (existingVariant) {
+        const { error: vUpdateErr } = await supabase
+          .from("product_variants")
+          .update(variantData)
+          .eq("id", existingVariant.id);
+        if (vUpdateErr) throw new Error(`Failed to update variant '${v.sku}': ${vUpdateErr.message}`);
+      } else {
+        const { error: vInsertErr } = await supabase
+          .from("product_variants")
+          .insert(variantData);
+        if (vInsertErr) throw new Error(`Failed to insert variant '${v.sku}': ${vInsertErr.message}`);
+      }
     }
-    variantsSynced++;
+  } catch (err) {
+    if (isCreated) {
+      // Rollback newly inserted product if variant creation failed
+      await supabase.from("products").delete().eq("id", productId);
+    }
+    throw err;
   }
 
-  return { productId, created: isCreated, variantsCount: variantsSynced };
+  // Independent database read verification
+  const { data: verified, error: verifyErr } = await supabase
+    .from("products")
+    .select("id,name,slug,status,category,image_url,price,product_variants(id,sku,qikink_sku,is_active,price)")
+    .eq("id", productId)
+    .single();
+
+  if (verifyErr || !verified) {
+    throw new Error(`Independent post-publish read failed for product '${item.name}': ${verifyErr?.message || "Record not found"}`);
+  }
+
+  const variants = verified.product_variants || [];
+  const validSkus = variants.filter((v: { qikink_sku?: string; is_active?: boolean }) => Boolean(v.qikink_sku?.trim()) && v.is_active);
+
+  const publicationResult: VerifiedProductPublication = {
+    productId: verified.id,
+    name: verified.name,
+    slug: verified.slug,
+    status: verified.status,
+    category: verified.category || "Apparel",
+    imageUrl: verified.image_url,
+    price: Number(verified.price),
+    variantsCount: variants.length,
+    validSkusCount: validSkus.length,
+    created: isCreated,
+    verifiedAt: new Date().toISOString(),
+  };
+
+  // Record audit entry
+  try {
+    await supabase.from("qikink_sync_logs").insert({
+      sync_type: "products",
+      status: "success",
+      items_count: 1,
+      details: {
+        productId,
+        name: item.name,
+        variantsCount: variants.length,
+        validSkusCount: validSkus.length,
+        created: isCreated,
+      },
+    });
+  } catch {
+    // Non-blocking log failure
+  }
+
+  return publicationResult;
 }
 
 /**
@@ -158,14 +220,15 @@ export async function pushProductToTrendEra(
 export async function syncAllProducts(
   products: QikinkProductImportItem[],
   options: PushProductOptions = { preserveExistingPrices: true, status: "published" },
-): Promise<QikinkSyncResult> {
-  const result: QikinkSyncResult = {
+): Promise<QikinkSyncResult & { verifiedProducts: VerifiedProductPublication[] }> {
+  const result: QikinkSyncResult & { verifiedProducts: VerifiedProductPublication[] } = {
     success: true,
     createdProducts: 0,
     updatedProducts: 0,
     createdVariants: 0,
     updatedVariants: 0,
     errors: [],
+    verifiedProducts: [],
   };
 
   const supabase = getAdminClient();
@@ -179,6 +242,7 @@ export async function syncAllProducts(
         result.updatedProducts++;
       }
       result.createdVariants += res.variantsCount;
+      result.verifiedProducts.push(res);
     } catch (err) {
       result.success = false;
       const msg = err instanceof Error ? err.message : `Failed to sync product ${p.name}`;
@@ -201,7 +265,7 @@ export async function syncAllProducts(
       error_message: result.errors.length ? result.errors.join("; ") : null,
     });
   } catch {
-    // Ignore logging failures
+    // Non-blocking
   }
 
   return result;
@@ -238,7 +302,7 @@ export async function syncProductCategories(
       details: { categoryMappings },
     });
   } catch {
-    // Ignore logging failures
+    // Non-blocking
   }
 
   return { updatedCount };
@@ -284,7 +348,7 @@ export async function syncProductImages(
       details: { productId, imageUrl, hasVariantMockups: Boolean(variantMockups) },
     });
   } catch {
-    // Ignore logging failures
+    // Non-blocking
   }
 
   return { success: true };

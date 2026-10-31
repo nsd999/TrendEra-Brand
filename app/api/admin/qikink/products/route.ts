@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { isAuthorizedAdmin } from "@/lib/admin/auth";
+import { getAdminClient, inspectSupabaseConfig } from "@/lib/supabase/admin";
 import {
   getPresetQikinkTemplates,
   parseProductCsv,
@@ -14,39 +14,56 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
-
 export async function GET(request: Request) {
   if (!(await isAuthorizedAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized admin access." }, { status: 401 });
   }
 
-  const supabase = getAdminClient();
-  const { data: dbProducts, error: dbError } = await supabase
-    .from("products")
-    .select("id,name,slug,description,price,category,image_url,qikink_product_id,status,created_at,product_variants(id,label,size,colour,sku,qikink_sku,price,cost_price,mockup_link,is_active)")
-    .order("created_at", { ascending: false });
-
-  if (dbError) {
-    return NextResponse.json({ error: `Database error: ${dbError.message}` }, { status: 500 });
+  const config = inspectSupabaseConfig();
+  if (!config.hasUrl || !config.hasServiceRoleKey) {
+    return NextResponse.json({
+      storeProducts: [],
+      presetTemplates: getPresetQikinkTemplates(),
+      recentLogs: [],
+      configurationError: `Supabase server configuration is missing: ${config.missingVariables.join(", ")}.`,
+    });
   }
 
-  const { data: recentLogs } = await supabase
-    .from("qikink_sync_logs")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(10);
+  try {
+    const supabase = getAdminClient();
+    const { data: dbProducts, error: dbError } = await supabase
+      .from("products")
+      .select("id,name,slug,description,price,category,image_url,qikink_product_id,status,created_at,product_variants(id,label,size,colour,sku,qikink_sku,price,cost_price,mockup_link,width_inches,height_inches,is_active)")
+      .order("created_at", { ascending: false });
 
-  return NextResponse.json({
-    storeProducts: dbProducts ?? [],
-    presetTemplates: getPresetQikinkTemplates(),
-    recentLogs: recentLogs ?? [],
-  });
+    if (dbError) {
+      return NextResponse.json({
+        storeProducts: [],
+        presetTemplates: getPresetQikinkTemplates(),
+        recentLogs: [],
+        configurationError: `Database query failed: ${dbError.message}`,
+      });
+    }
+
+    const { data: recentLogs } = await supabase
+      .from("qikink_sync_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    return NextResponse.json({
+      storeProducts: dbProducts ?? [],
+      presetTemplates: getPresetQikinkTemplates(),
+      recentLogs: recentLogs ?? [],
+    });
+  } catch (err) {
+    return NextResponse.json({
+      storeProducts: [],
+      presetTemplates: getPresetQikinkTemplates(),
+      recentLogs: [],
+      configurationError: err instanceof Error ? err.message : "Database connection failed",
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -154,4 +171,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { createClient } from "@supabase/supabase-js";
-import { createQikinkOrder, type QikinkDesign, type QikinkShippingAddress } from "./client";
+import { getAdminClient } from "../supabase/admin.ts";
+import { createQikinkOrder, type QikinkDesign, type QikinkShippingAddress } from "./client.ts";
 
 type StoreOrderItem = {
   product_name: string;
@@ -18,13 +18,6 @@ type StoreOrderItem = {
   print_type_id: number;
 };
 
-function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) throw new Error("Supabase server configuration is missing.");
-  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-}
-
 /** Call only after payment is verified, or after a COD order has been explicitly confirmed. */
 export async function submitStoreOrderToQikink(orderId: string) {
   const supabase = getAdminClient();
@@ -38,6 +31,7 @@ export async function submitStoreOrderToQikink(orderId: string) {
   const allowed = order.payment_method === "online"
     ? order.payment_status === "paid"
     : order.payment_method === "cod" && order.status === "confirmed";
+
   if (!allowed) throw new Error("Order is not eligible for Qikink fulfilment yet.");
 
   const { data: claim, error: claimError } = await supabase
